@@ -1,576 +1,882 @@
 /**
- * PP-HDB: Privacy-Preserving Healthcare Database
+ * PP-HDB: Multi-Hospital Privacy-Preserving Healthcare System
  * Frontend Controller & Interaction Engine
  */
 
+// Global State
+let currentHospitalId = "node_a";
+let currentHospitalName = "Hospital A";
+let currentAdminName = "Dr. Arthur Vance (CMO)";
+let activeTab = "tab-local-ehr";
+
+const HOSPITAL_PROFILES = {
+  "node_a": { name: "Hospital A", admin: "Dr. Arthur Vance (CMO)", color: "#3b82f6" },
+  "node_b": { name: "Hospital B", admin: "Dr. Beatrice Ramos (Clinical Dir)", color: "#10b981" },
+  "node_c": { name: "Hospital C", admin: "Dr. Charles Kim (Pharmacy Head)", color: "#8b5cf6" }
+};
+
 document.addEventListener("DOMContentLoaded", () => {
   // Elements
-  const roleSelect = document.getElementById("role-select");
-  const purposeSelect = document.getElementById("purpose-select");
-  const budgetVal = document.getElementById("budget-val");
-  const budgetFill = document.getElementById("budget-bar-fill");
-  const btnResetBudget = document.getElementById("btn-reset-budget");
+  const hospitalSwitch = document.getElementById("hospital-switch-select");
+  const activeHospName = document.getElementById("active-hospital-name");
+  const activeAdmName = document.getElementById("active-admin-name");
+  const hospDot = document.getElementById("hospital-indicator-dot");
 
-  const sliderEpsilon = document.getElementById("slider-epsilon");
-  const epsilonDisplay = document.getElementById("epsilon-display");
-  const epsilonGuide = document.getElementById("epsilon-guide");
+  const btnNotifBell = document.getElementById("btn-notif-bell");
+  const notifMenu = document.getElementById("notif-menu");
+  const notifBadge = document.getElementById("notif-badge");
+  const notifList = document.getElementById("notif-list");
+  const btnMarkNotifsRead = document.getElementById("btn-mark-notifs-read");
 
-  const toggleDp = document.getElementById("toggle-dp");
-  const toggleSmpc = document.getElementById("toggle-smpc");
-  const toggleSuppression = document.getElementById("toggle-suppression");
+  const navTabs = document.querySelectorAll(".nav-tab");
+  const tabContents = document.querySelectorAll(".tab-content");
 
-  const queryForm = document.getElementById("query-form");
-  const btnRunQuery = document.getElementById("btn-run-query");
-  const resultsPlaceholder = document.getElementById("results-placeholder");
-  const resultsContent = document.getElementById("results-content");
-  const queryStatusBadge = document.getElementById("query-status-badge");
+  // Local EHR Elements
+  const localSearch = document.getElementById("local-patient-search");
+  const localPatientsTbody = document.getElementById("local-patients-tbody");
+  const localEhrTitle = document.getElementById("local-ehr-title");
+  const profilePlaceholder = document.getElementById("profile-placeholder");
+  const profileContent = document.getElementById("profile-content");
 
-  // Presets
-  const presetButtons = document.querySelectorAll(".btn-preset");
+  // Discovery Elements
+  const discoveryInput = document.getElementById("discovery-input");
+  const btnRunDiscovery = document.getElementById("btn-run-discovery");
+  const discoveryResultsWrapper = document.getElementById("discovery-results-wrapper");
+  const presenceGrid = document.getElementById("presence-grid");
+  const presenceOverallBadge = document.getElementById("presence-overall-badge");
+  const requestActionCard = document.getElementById("request-action-card");
+  const shareRequestForm = document.getElementById("share-request-form");
+  const sharedDataCard = document.getElementById("shared-data-card");
+  const sharedPayloadView = document.getElementById("shared-payload-view");
 
-  // Vault Tabs
-  const vaultTabs = document.querySelectorAll(".vault-tab");
-  const vaultHeaders = document.getElementById("vault-headers");
-  const vaultBody = document.getElementById("vault-body");
+  // Add Patient & Encounter Elements
+  const formRegisterPatient = document.getElementById("form-register-patient");
+  const formAddEncounter = document.getElementById("form-add-encounter");
+  const encTokenSelect = document.getElementById("enc-token-select");
+  const encCategory = document.getElementById("enc-category");
+  const encDiagFields = document.getElementById("enc-diag-fields");
+  const encHistoryFields = document.getElementById("enc-history-fields");
+  const encRxFields = document.getElementById("enc-rx-fields");
 
-  // Anonymizer
-  const btnExportAnon = document.getElementById("btn-export-anonymized");
-  const anonCondition = document.getElementById("anon-condition");
-  const anonK = document.getElementById("anon-k");
-  const anonL = document.getElementById("anon-l");
-  const anonResults = document.getElementById("anon-results");
-  const anonTotalIn = document.getElementById("anon-total-in");
-  const anonRetained = document.getElementById("anon-retained");
-  const anonSuppressed = document.getElementById("anon-suppressed");
-  const anonTbody = document.getElementById("anon-tbody");
+  // Requests Elements
+  const incomingList = document.getElementById("incoming-requests-list");
+  const outgoingList = document.getElementById("outgoing-requests-list");
+  const incomingBadge = document.getElementById("incoming-count-badge");
+  const tabRequestBadge = document.getElementById("tab-request-badge");
 
-  // Audit
-  const btnVerifyChain = document.getElementById("btn-verify-chain");
-  const btnSimulateTamper = document.getElementById("btn-simulate-tamper");
-  const btnRestoreChain = document.getElementById("btn-restore-chain");
-  const chainIntegrityBadge = document.getElementById("chain-integrity-badge");
-  const blocksContainer = document.getElementById("blocks-container");
+  // Dialogs
+  const loginDialog = document.getElementById("login-dialog");
+  const btnOpenLogin = document.getElementById("btn-open-login");
+  const btnCloseLogin = document.getElementById("btn-close-login");
+  const loginForm = document.getElementById("login-form");
 
-  // ==========================================
-  // 1. Initial State & Data Fetching
-  // ==========================================
+  const reviewDialog = document.getElementById("review-dialog");
+  const btnCloseReview = document.getElementById("btn-close-review");
+  const reviewModalBody = document.getElementById("review-modal-body");
+
+  // Analytics
+  const analyticsForm = document.getElementById("analytics-query-form");
+  const statResultBox = document.getElementById("stat-result-box");
+  const statResultBadge = document.getElementById("stat-result-badge");
+
+  // =========================================================================
+  // 1. Initialization
+  // =========================================================================
   async function init() {
-    await fetchNodeStats();
-    await fetchBudget();
-    await loadVault("node_a");
-    await fetchAuditBlocks();
-    setupSliderGuide();
+    updateHospitalContext(currentHospitalId);
+    setupEventListeners();
+    await refreshAllData();
+    // Poll notifications every 8 seconds
+    setInterval(fetchNotifications, 8000);
   }
 
-  async function fetchNodeStats() {
+  function updateHospitalContext(hId) {
+    currentHospitalId = hId;
+    const info = HOSPITAL_PROFILES[hId];
+    currentHospitalName = info.name;
+    currentAdminName = info.admin;
+
+    activeHospName.innerText = info.name;
+    activeAdmName.innerText = info.admin;
+    hospDot.style.background = info.color;
+    hospDot.style.boxShadow = `0 0 10px ${info.color}`;
+
+    localEhrTitle.innerText = `${info.name}: Local Patient Roster`;
+    document.getElementById("add-patient-hospital-badge").innerText = info.name;
+    hospitalSwitch.value = hId;
+  }
+
+  async function refreshAllData() {
+    await fetchLocalPatients();
+    await fetchNotifications();
+    await fetchSharingRequests();
+  }
+
+  // =========================================================================
+  // 2. Navigation Tabs
+  // =========================================================================
+  navTabs.forEach(tab => {
+    tab.addEventListener("click", () => {
+      navTabs.forEach(t => t.classList.remove("active"));
+      tabContents.forEach(c => c.classList.remove("active"));
+
+      tab.classList.add("active");
+      activeTab = tab.dataset.tab;
+      document.getElementById(activeTab).classList.add("active");
+
+      if (activeTab === "tab-local-ehr") fetchLocalPatients();
+      if (activeTab === "tab-sharing-requests") fetchSharingRequests();
+    });
+  });
+
+  // =========================================================================
+  // 3. Hospital Switcher & Authentication
+  // =========================================================================
+  hospitalSwitch.addEventListener("change", (e) => {
+    updateHospitalContext(e.target.value);
+    profileContent.classList.add("hidden");
+    profilePlaceholder.classList.remove("hidden");
+    discoveryResultsWrapper.classList.add("hidden");
+    refreshAllData();
+  });
+
+  btnOpenLogin.addEventListener("click", () => loginDialog.showModal());
+  btnCloseLogin.addEventListener("click", () => loginDialog.close());
+
+  window.selectLogin = function(username) {
+    document.getElementById("login-username").value = username;
+  };
+
+  loginForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const u = document.getElementById("login-username").value;
+    const p = document.getElementById("login-password").value;
+
     try {
-      const res = await fetch("/api/nodes");
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: u, password: p })
+      });
       const data = await res.json();
       if (data.success) {
-        data.nodes.forEach(node => {
-          if (node.node_id === "node_a") document.getElementById("node-a-count").innerText = node.total_records;
-          if (node.node_id === "node_b") document.getElementById("node-b-count").innerText = node.total_records;
-          if (node.node_id === "node_c") document.getElementById("node-c-count").innerText = node.total_records;
+        updateHospitalContext(data.user.hospital_id);
+        loginDialog.close();
+        refreshAllData();
+      } else {
+        alert("Login failed: " + data.error);
+      }
+    } catch (err) {
+      alert("Error signing in: " + err.message);
+    }
+  });
+
+  // =========================================================================
+  // 4. Notifications Popover
+  // =========================================================================
+  btnNotifBell.addEventListener("click", (e) => {
+    e.stopPropagation();
+    notifMenu.classList.toggle("hidden");
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!notifMenu.contains(e.target) && e.target !== btnNotifBell) {
+      notifMenu.classList.add("hidden");
+    }
+  });
+
+  async function fetchNotifications() {
+    try {
+      const res = await fetch(`/api/notifications?hospital_id=${currentHospitalId}`);
+      const data = await res.json();
+      if (!data.success) return;
+
+      const notifs = data.notifications;
+      const unread = data.unread_count;
+
+      if (unread > 0) {
+        notifBadge.innerText = unread;
+        notifBadge.classList.remove("hidden");
+      } else {
+        notifBadge.classList.add("hidden");
+      }
+
+      if (notifs.length === 0) {
+        notifList.innerHTML = `<div class="notif-empty">No notifications for ${currentHospitalName}</div>`;
+      } else {
+        notifList.innerHTML = "";
+        notifs.forEach(n => {
+          const div = document.createElement("div");
+          div.className = `notif-item ${n.is_read ? '' : 'unread'}`;
+          div.innerHTML = `
+            <div class="notif-title">${n.title}</div>
+            <div class="notif-body">${n.message}</div>
+            <div class="notif-time">${new Date(n.created_at).toLocaleTimeString()} • ${n.request_id}</div>
+          `;
+          div.addEventListener("click", () => {
+            notifMenu.classList.add("hidden");
+            // Jump to requests tab
+            const reqTabBtn = document.querySelector('[data-tab="tab-sharing-requests"]');
+            if (reqTabBtn) reqTabBtn.click();
+          });
+          notifList.appendChild(div);
         });
       }
     } catch (err) {
-      console.error("Failed to fetch node statistics:", err);
+      console.error("Failed to fetch notifications:", err);
     }
   }
 
-  async function fetchBudget() {
+  btnMarkNotifsRead.addEventListener("click", async () => {
     try {
-      const res = await fetch("/api/budget");
-      const data = await res.json();
-      if (data.success) {
-        updateBudgetUI(data.budget);
-      }
+      await fetch("/api/notifications/mark-read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hospital_id: currentHospitalId })
+      });
+      fetchNotifications();
     } catch (err) {
-      console.error("Failed to fetch budget:", err);
-    }
-  }
-
-  function updateBudgetUI(budget) {
-    budgetVal.innerText = `${budget.remaining_budget.toFixed(2)} / ${budget.total_budget.toFixed(1)}`;
-    const pct = Math.max(0, Math.min(100, (budget.remaining_budget / budget.total_budget) * 100));
-    budgetFill.style.width = `${pct}%`;
-
-    if (pct < 20) {
-      budgetFill.style.background = "var(--accent-rose)";
-    } else if (pct < 50) {
-      budgetFill.style.background = "var(--accent-amber)";
-    } else {
-      budgetFill.style.background = "linear-gradient(90deg, var(--accent-purple), var(--accent-cyan))";
-    }
-  }
-
-  btnResetBudget.addEventListener("click", async () => {
-    try {
-      const res = await fetch("/api/budget/reset", { method: "POST" });
-      const data = await res.json();
-      if (data.success) {
-        updateBudgetUI(data.budget);
-        alert("Privacy Budget (ε) successfully reset to 10.0.");
-      }
-    } catch (err) {
-      console.error("Error resetting budget:", err);
+      console.error(err);
     }
   });
 
-  // ==========================================
-  // 2. Slider & Guidance
-  // ==========================================
-  function setupSliderGuide() {
-    sliderEpsilon.addEventListener("input", () => {
-      const val = parseFloat(sliderEpsilon.value);
-      epsilonDisplay.innerText = val.toFixed(2);
+  // =========================================================================
+  // 5. Local Patient Records (EHR)
+  // =========================================================================
+  async function fetchLocalPatients() {
+    try {
+      const q = localSearch.value || "";
+      const res = await fetch(`/api/patient/search?hospital_id=${currentHospitalId}&q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (!data.success) return;
 
-      if (val <= 0.2) {
-        epsilonGuide.innerText = "Ultra-Strict Privacy (Heavy Laplace Noise)";
-        epsilonGuide.style.color = "var(--accent-rose)";
-      } else if (val <= 0.8) {
-        epsilonGuide.innerText = "Strong Privacy (Substantial Noise)";
-        epsilonGuide.style.color = "var(--accent-amber)";
-      } else if (val <= 2.0) {
-        epsilonGuide.innerText = "Balanced Tradeoff (Standard Clinical Research)";
-        epsilonGuide.style.color = "var(--accent-cyan)";
-      } else {
-        epsilonGuide.innerText = "High Utility / Lower Privacy (Minimal Noise)";
-        epsilonGuide.style.color = "var(--accent-emerald)";
+      localPatientsTbody.innerHTML = "";
+      encTokenSelect.innerHTML = "";
+
+      if (data.patients.length === 0) {
+        localPatientsTbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:2rem; color:var(--text-muted);">No patients found in local database.</td></tr>`;
+        return;
       }
-    });
+
+      data.patients.forEach(p => {
+        // Add to local roster table
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><strong>${p.name}</strong><br><code style="font-size:0.68rem; color:var(--text-muted);">${p.token.substring(0, 14)}...</code></td>
+          <td>${p.age} / ${p.gender}</td>
+          <td><span class="badge badge-cyan">${p.blood_group}</span></td>
+          <td>${p.primary_condition}</td>
+          <td><span class="badge badge-emerald">Available</span></td>
+          <td><button class="btn-xs" onclick="viewLocalChart('${p.token}')">View Chart</button></td>
+        `;
+        localPatientsTbody.appendChild(tr);
+
+        // Populate Add Encounter select
+        const opt = document.createElement("option");
+        opt.value = p.token;
+        opt.innerText = `${p.name} (${p.primary_condition})`;
+        encTokenSelect.appendChild(opt);
+      });
+    } catch (err) {
+      console.error("Error fetching local patients:", err);
+    }
   }
 
-  // ==========================================
-  // 3. Clinical Presets
-  // ==========================================
-  const PRESETS = {
-    "diabetes-metformin": {
-      condition: "Type-2 Diabetes",
-      severity: "",
-      biomarker: "",
-      abnormal: "false",
-      medication: "Metformin",
-      outcome: "Positive",
-      epsilon: 1.00
-    },
-    "htn-lisinopril": {
-      condition: "Essential Hypertension",
-      severity: "",
-      biomarker: "Systolic BP",
-      abnormal: "false",
-      medication: "Lisinopril",
-      outcome: "Positive",
-      epsilon: 1.00
-    },
-    "cad-statin": {
-      condition: "Coronary Artery Disease",
-      severity: "Moderate",
-      biomarker: "LDL-C",
-      abnormal: "false",
-      medication: "Atorvastatin",
-      outcome: "",
-      epsilon: 1.50
-    },
-    "asthma-fluticasone": {
-      condition: "Bronchial Asthma",
-      severity: "",
-      biomarker: "FEV1/FVC",
-      abnormal: "false",
-      medication: "Fluticasone",
-      outcome: "Positive",
-      epsilon: 0.80
+  localSearch.addEventListener("input", debounce(fetchLocalPatients, 300));
+
+  window.viewLocalChart = async function(token) {
+    try {
+      const res = await fetch(`/api/patient/profile?hospital_id=${currentHospitalId}&token=${token}`);
+      const data = await res.json();
+      if (!data.success) return;
+
+      const p = data.profile.patient;
+      const history = data.profile.medical_history;
+      const diagnostics = data.profile.diagnostics;
+      const prescriptions = data.profile.prescriptions;
+
+      profilePlaceholder.classList.add("hidden");
+      profileContent.classList.remove("hidden");
+
+      document.getElementById("profile-token-badge").innerText = token.substring(0, 16);
+      document.getElementById("prof-name").innerText = p.name;
+      document.getElementById("prof-meta").innerText = `${p.age} yrs • ${p.gender === 'M' ? 'Male' : 'Female'} • Blood: ${p.blood_group} • Allergies: ${p.allergies}`;
+      document.getElementById("prof-condition-tag").innerText = p.primary_condition;
+
+      // History
+      const hList = document.getElementById("prof-history-list");
+      hList.innerHTML = history.length ? "" : "<div class='placeholder-msg'>No prior diagnoses recorded locally.</div>";
+      history.forEach(h => {
+        hList.innerHTML += `
+          <div class="chart-item">
+            <div class="chart-item-main">
+              <strong>${h.condition}</strong> (${h.icd10}) • <em>${h.severity}</em>
+              <div class="chart-item-meta">${h.clinical_notes}</div>
+            </div>
+            <span class="badge badge-purple">${h.diagnosis_year}</span>
+          </div>
+        `;
+      });
+
+      // Diagnostics
+      const dList = document.getElementById("prof-diag-list");
+      dList.innerHTML = diagnostics.length ? "" : "<div class='placeholder-msg'>No diagnostic reports recorded locally.</div>";
+      diagnostics.forEach(d => {
+        dList.innerHTML += `
+          <div class="chart-item">
+            <div class="chart-item-main">
+              <strong>${d.biomarker_name}</strong>: ${d.biomarker_value} ${d.unit}
+              <div class="chart-item-meta">${d.test_name}</div>
+            </div>
+            <span class="badge ${d.abnormal_flag ? 'badge-rose' : 'badge-emerald'}">
+              ${d.abnormal_flag ? '⚠️ Abnormal' : 'Normal'} (${d.test_year})
+            </span>
+          </div>
+        `;
+      });
+
+      // Prescriptions
+      const rList = document.getElementById("prof-rx-list");
+      rList.innerHTML = prescriptions.length ? "" : "<div class='placeholder-msg'>No active prescriptions recorded locally.</div>";
+      prescriptions.forEach(r => {
+        rList.innerHTML += `
+          <div class="chart-item">
+            <div class="chart-item-main">
+              <strong>${r.medication}</strong> (${r.dosage}) • ${r.frequency}
+              <div class="chart-item-meta">Adherence: ${Math.round(r.adherence_rate * 100)}%</div>
+            </div>
+            <span class="badge badge-cyan">${r.response_outcome}</span>
+          </div>
+        `;
+      });
+
+    } catch (err) {
+      console.error("Error viewing patient chart:", err);
     }
   };
 
-  presetButtons.forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      presetButtons.forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
+  // =========================================================================
+  // 6. Patient Discovery & Presence Locator
+  // =========================================================================
+  btnRunDiscovery.addEventListener("click", runDiscoverySearch);
+  discoveryInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") runDiscoverySearch();
+  });
 
-      const key = btn.dataset.preset;
-      const p = PRESETS[key];
-      if (!p) return;
-
-      document.getElementById("filter-condition").value = p.condition;
-      document.getElementById("filter-severity").value = p.severity;
-      document.getElementById("filter-biomarker").value = p.biomarker;
-      document.getElementById("filter-abnormal").value = p.abnormal;
-      document.getElementById("filter-medication").value = p.medication;
-      document.getElementById("filter-outcome").value = p.outcome;
-      sliderEpsilon.value = p.epsilon;
-      sliderEpsilon.dispatchEvent(new Event("input"));
+  // Quick Chips
+  document.querySelectorAll(".chip-btn").forEach(chip => {
+    chip.addEventListener("click", () => {
+      discoveryInput.value = chip.dataset.query;
+      runDiscoverySearch();
     });
   });
 
-  // ==========================================
-  // 4. Federated Topology Animation
-  // ==========================================
-  function triggerTopologyPulse() {
-    const pA = document.getElementById("pulse-a");
-    const pB = document.getElementById("pulse-b");
-    const pC = document.getElementById("pulse-c");
+  async function runDiscoverySearch() {
+    const q = discoveryInput.value.trim();
+    if (!q) return;
 
-    [pA, pB, pC].forEach(p => {
-      p.setAttribute("opacity", "1");
-    });
+    btnRunDiscovery.disabled = true;
+    btnRunDiscovery.innerText = "Checking Federation Nodes...";
 
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += 0.05;
-      if (progress >= 1) {
-        clearInterval(interval);
-        [pA, pB, pC].forEach(p => p.setAttribute("opacity", "0"));
-      } else {
-        // Linear interpolation towards center (480, 130)
-        pA.setAttribute("cx", 160 + (480 - 160) * progress);
-        pA.setAttribute("cy", 70 + (130 - 70) * progress);
+    try {
+      const res = await fetch(`/api/patient/discover?hospital_id=${currentHospitalId}&q=${encodeURIComponent(q)}`);
+      const data = await res.json();
 
-        pB.setAttribute("cx", 160 + (480 - 160) * progress);
-        pB.setAttribute("cy", 190 + (130 - 190) * progress);
-
-        pC.setAttribute("cx", 800 + (480 - 800) * progress);
-        pC.setAttribute("cy", 130);
+      if (!data.success) {
+        alert(data.error);
+        return;
       }
-    }, 30);
+
+      renderDiscoveryResults(data.discovery);
+    } catch (err) {
+      alert("Discovery error: " + err.message);
+    } finally {
+      btnRunDiscovery.disabled = false;
+      btnRunDiscovery.innerText = "🔍 Check Data Availability Across Federation";
+    }
   }
 
-  // ==========================================
-  // 5. Query Execution
-  // ==========================================
-  queryForm.addEventListener("submit", async (e) => {
+  function renderDiscoveryResults(discovery) {
+    discoveryResultsWrapper.classList.remove("hidden");
+    requestActionCard.classList.add("hidden");
+    sharedDataCard.classList.add("hidden");
+
+    if (!discovery.found_anywhere) {
+      presenceOverallBadge.innerText = "NOT PRESENT ANYWHERE IN FEDERATION";
+      presenceOverallBadge.className = "badge badge-rose";
+      presenceGrid.innerHTML = `
+        <div style="grid-column: 1 / -1; padding: 2.5rem; text-align: center; background: rgba(0,0,0,0.3); border-radius: var(--radius-lg);">
+          <h3 style="color: var(--accent-rose);">❌ No Records Found</h3>
+          <p style="color: var(--text-secondary); margin-top: 0.5rem;">
+            Patient "${discovery.search_query}" is not registered in Hospital A, Hospital B, or Hospital C.
+          </p>
+        </div>
+      `;
+      return;
+    }
+
+    presenceOverallBadge.innerText = "PATIENT LOCATED IN FEDERATION";
+    presenceOverallBadge.className = "badge badge-emerald";
+
+    presenceGrid.innerHTML = "";
+    discovery.federation_presence.forEach(node => {
+      const isCurrent = node.is_current_hospital;
+      const isPresent = node.present;
+
+      const div = document.createElement("div");
+      div.className = `presence-card ${isCurrent ? 'current' : ''} ${isPresent ? 'available' : ''}`;
+
+      let actionHtml = "";
+      if (isCurrent && isPresent) {
+        actionHtml = `<span class="badge badge-cyan">Data Present in Local Vault</span>`;
+      } else if (!isCurrent && isPresent) {
+        actionHtml = `
+          <button class="btn-xs success" onclick="openRequestForm('${node.hospital_id}', '${node.hospital_name}', '${discovery.patient_token}', '${discovery.patient_name || 'Patient'}')">
+            Request Scoped Data from ${node.hospital_name}
+          </button>
+        `;
+      } else {
+        actionHtml = `<span class="badge badge-rose">No Records at this site</span>`;
+      }
+
+      div.innerHTML = `
+        <div class="presence-header">
+          <span class="presence-hname">${node.hospital_name} ${isCurrent ? '(This Hospital)' : ''}</span>
+          <span class="presence-status-badge ${isPresent ? 'status-present' : 'status-absent'}">
+            ${isPresent ? '● PRESENT' : '○ ABSENT'}
+          </span>
+        </div>
+
+        <div class="category-tags">
+          <div class="cat-indicator ${node.categories.medical_history ? 'has' : 'nohas'}">
+            ${node.categories.medical_history ? '✓' : '✗'} Medical History & ICD-10
+          </div>
+          <div class="cat-indicator ${node.categories.diagnostics ? 'has' : 'nohas'}">
+            ${node.categories.diagnostics ? '✓' : '✗'} Diagnostic Reports & Labs
+          </div>
+          <div class="cat-indicator ${node.categories.prescriptions ? 'has' : 'nohas'}">
+            ${node.categories.prescriptions ? '✓' : '✗'} Prescriptions & Pharmacy
+          </div>
+        </div>
+
+        <div style="margin-top: 0.5rem; border-top: 1px solid var(--border-color); padding-top: 0.5rem;">
+          ${actionHtml}
+        </div>
+      `;
+      presenceGrid.appendChild(div);
+    });
+  }
+
+  window.openRequestForm = function(targetHospId, targetHospName, token, pName) {
+    requestActionCard.classList.remove("hidden");
+    document.getElementById("req-target-hospital-id").value = targetHospId;
+    document.getElementById("req-target-hospital-name").value = `${targetHospName} (${targetHospId.toUpperCase()})`;
+    document.getElementById("req-patient-token").value = token;
+    document.getElementById("req-patient-name").value = pName;
+
+    requestActionCard.scrollIntoView({ behavior: "smooth" });
+  };
+
+  shareRequestForm.addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    btnRunQuery.disabled = true;
-    btnRunQuery.innerHTML = `<span class="btn-icon">⏳</span> Executing Privacy Pipeline...`;
-    queryStatusBadge.innerText = "Querying...";
-    queryStatusBadge.className = "badge badge-cyan";
+    const targetHospId = document.getElementById("req-target-hospital-id").value;
+    const token = document.getElementById("req-patient-token").value;
+    const pName = document.getElementById("req-patient-name").value;
+    const purpose = document.getElementById("req-purpose").value;
+    const justification = document.getElementById("req-justification").value;
 
-    triggerTopologyPulse();
+    const categories = [];
+    if (document.getElementById("req-cat-history").checked) categories.push("medical_history");
+    if (document.getElementById("req-cat-diagnostics").checked) categories.push("diagnostics");
+    if (document.getElementById("req-cat-prescriptions").checked) categories.push("prescriptions");
 
-    const payload = {
-      condition: document.getElementById("filter-condition").value || null,
-      severity: document.getElementById("filter-severity").value || null,
-      biomarker: document.getElementById("filter-biomarker").value || null,
-      abnormal_lab_only: document.getElementById("filter-abnormal").value === "true",
-      medication: document.getElementById("filter-medication").value || null,
-      response_outcome: document.getElementById("filter-outcome").value || null,
-      epsilon: parseFloat(sliderEpsilon.value),
-      use_dp: toggleDp.checked,
-      use_smpc: toggleSmpc.checked,
-      enforce_suppression: toggleSuppression.checked,
-      role: roleSelect.value,
-      purpose: purposeSelect.value,
-      researcher_name: "Dr. Clinical Investigator"
-    };
+    if (categories.length === 0) {
+      alert("Please select at least one data category to request.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/sharing/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from_hospital: currentHospitalId,
+          to_hospital: targetHospId,
+          patient_token: token,
+          patient_name: pName,
+          requested_categories: categories,
+          purpose: purpose,
+          justification: justification
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`✅ Request Submitted!\n\n${data.message}\n\nTarget Hospital Admin has been notified to review and verify this request.`);
+        requestActionCard.classList.add("hidden");
+        fetchSharingRequests();
+      } else {
+        alert("Request failed: " + data.error);
+      }
+    } catch (err) {
+      alert("Error submitting request: " + err.message);
+    }
+  });
+
+  // =========================================================================
+  // 7. Sharing Requests & Review Workflow
+  // =========================================================================
+  async function fetchSharingRequests() {
+    try {
+      const res = await fetch(`/api/sharing/requests?hospital_id=${currentHospitalId}`);
+      const data = await res.json();
+      if (!data.success) return;
+
+      const incoming = data.requests.incoming;
+      const outgoing = data.requests.outgoing;
+
+      const pendingIncoming = incoming.filter(r => r.status === "PENDING").length;
+      incomingBadge.innerText = `${pendingIncoming} Pending`;
+      if (pendingIncoming > 0) {
+        tabRequestBadge.innerText = pendingIncoming;
+        tabRequestBadge.classList.remove("hidden");
+      } else {
+        tabRequestBadge.classList.add("hidden");
+      }
+
+      // Render Incoming
+      incomingList.innerHTML = incoming.length ? "" : "<div class='placeholder-msg'>No incoming data requests.</div>";
+      incoming.forEach(r => {
+        const cats = JSON.parse(r.requested_categories).map(c => c.replace("_", " ")).join(", ");
+        const card = document.createElement("div");
+        card.className = "request-card";
+        card.innerHTML = `
+          <div class="request-card-header">
+            <span class="req-id">${r.request_id} • From ${r.from_hospital.toUpperCase()}</span>
+            <span class="req-status-badge status-${r.status.toLowerCase()}">${r.status}</span>
+          </div>
+          <div>
+            <strong>Patient:</strong> ${r.patient_name} (<code style="font-size:0.68rem;">${r.patient_token.substring(0, 12)}...</code>)<br>
+            <strong>Requested Categories:</strong> <span style="color:var(--accent-cyan); font-weight:600;">[${cats}]</span><br>
+            <strong>Declared Purpose:</strong> ${r.purpose}<br>
+            <em style="color:var(--text-muted); font-size:0.75rem;">"${r.justification}"</em>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:0.3rem;">
+            <span style="font-size:0.68rem; color:var(--text-muted);">${new Date(r.created_at).toLocaleString()}</span>
+            ${r.status === 'PENDING' ? `<button class="btn-xs success" onclick="openReviewModal('${r.request_id}')">Review & Verify</button>` : `<span style="font-size:0.72rem; color:var(--text-muted);">Reviewed by ${r.reviewer || 'Admin'}</span>`}
+          </div>
+        `;
+        incomingList.appendChild(card);
+      });
+
+      // Render Outgoing
+      outgoingList.innerHTML = outgoing.length ? "" : "<div class='placeholder-msg'>No outgoing data requests.</div>";
+      outgoing.forEach(r => {
+        const cats = JSON.parse(r.requested_categories).map(c => c.replace("_", " ")).join(", ");
+        const card = document.createElement("div");
+        card.className = "request-card";
+        card.innerHTML = `
+          <div class="request-card-header">
+            <span class="req-id">${r.request_id} • To ${r.to_hospital.toUpperCase()}</span>
+            <span class="req-status-badge status-${r.status.toLowerCase()}">${r.status}</span>
+          </div>
+          <div>
+            <strong>Patient:</strong> ${r.patient_name}<br>
+            <strong>Requested Data:</strong> [${cats}]<br>
+            <strong>Purpose:</strong> ${r.purpose}
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:0.3rem;">
+            <span style="font-size:0.68rem; color:var(--text-muted);">${new Date(r.created_at).toLocaleString()}</span>
+            ${r.status === 'APPROVED' ? `<button class="btn-xs" onclick="viewSharedPayload('${r.request_id}')">View Verified Payload</button>` : ''}
+          </div>
+        `;
+        outgoingList.appendChild(card);
+      });
+
+    } catch (err) {
+      console.error("Error fetching sharing requests:", err);
+    }
+  }
+
+  window.openReviewModal = async function(requestId) {
+    const res = await fetch(`/api/sharing/requests?hospital_id=${currentHospitalId}`);
+    const data = await res.json();
+    const req = data.requests.incoming.find(r => r.request_id === requestId);
+    if (!req) return;
+
+    const reqCats = JSON.parse(req.requested_categories);
+
+    reviewModalBody.innerHTML = `
+      <div style="margin-bottom:1rem;">
+        <strong>Requesting Entity:</strong> ${req.from_hospital.toUpperCase()} Clinician<br>
+        <strong>Target Patient:</strong> ${req.patient_name} (${req.patient_token.substring(0, 14)}...)<br>
+        <strong>Stated Purpose:</strong> ${req.purpose}<br>
+        <strong>Justification:</strong> <em>"${req.justification}"</em>
+      </div>
+
+      <div style="background:rgba(0,0,0,0.25); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:0.85rem; margin-bottom:1.25rem;">
+        <h4 style="font-size:0.8rem; margin-bottom:0.5rem; color:var(--accent-cyan);">Granular Authorization (Data Minimization):</h4>
+        <p style="font-size:0.72rem; color:var(--text-secondary); margin-bottom:0.5rem;">Uncheck any categories you wish to redact from the shared payload:</p>
+        
+        <label class="checkbox-pill" style="margin-bottom:0.4rem;">
+          <input type="checkbox" id="rev-cat-history" ${reqCats.includes('medical_history') ? 'checked' : 'disabled'}>
+          <span>🩺 Patient Medical History</span>
+        </label>
+        <label class="checkbox-pill" style="margin-bottom:0.4rem;">
+          <input type="checkbox" id="rev-cat-diagnostics" ${reqCats.includes('diagnostics') ? 'checked' : 'disabled'}>
+          <span>🔬 Diagnostic Lab Reports</span>
+        </label>
+        <label class="checkbox-pill">
+          <input type="checkbox" id="rev-cat-prescriptions" ${reqCats.includes('prescriptions') ? 'checked' : 'disabled'}>
+          <span>💊 Active Prescriptions</span>
+        </label>
+      </div>
+
+      <div style="display:flex; gap:0.75rem; justify-content:flex-end;">
+        <button class="btn-xs danger" onclick="submitReviewDecision('${requestId}', 'REJECTED')">Decline Request</button>
+        <button class="btn-primary" onclick="submitReviewDecision('${requestId}', 'APPROVED')">Verify & Approve Scoped Release</button>
+      </div>
+    `;
+
+    reviewDialog.showModal();
+  };
+
+  btnCloseReview.addEventListener("click", () => reviewDialog.close());
+
+  window.submitReviewDecision = async function(requestId, decision) {
+    const approvedCats = [];
+    if (decision === "APPROVED") {
+      if (document.getElementById("rev-cat-history")?.checked) approvedCats.push("medical_history");
+      if (document.getElementById("rev-cat-diagnostics")?.checked) approvedCats.push("diagnostics");
+      if (document.getElementById("rev-cat-prescriptions")?.checked) approvedCats.push("prescriptions");
+      if (approvedCats.length === 0) {
+        alert("Please approve at least one category, or click 'Decline Request'.");
+        return;
+      }
+    }
+
+    try {
+      const res = await fetch("/api/sharing/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          request_id: requestId,
+          reviewer_hospital: currentHospitalId,
+          reviewer_name: currentAdminName,
+          decision: decision,
+          approved_categories: approvedCats
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`Request ${decision.toLowerCase()} successfully.`);
+        reviewDialog.close();
+        fetchSharingRequests();
+      } else {
+        alert("Error: " + data.error);
+      }
+    } catch (err) {
+      alert("Error submitting review: " + err.message);
+    }
+  };
+
+  window.viewSharedPayload = async function(requestId) {
+    const res = await fetch(`/api/sharing/requests?hospital_id=${currentHospitalId}`);
+    const data = await res.json();
+    const req = data.requests.outgoing.find(r => r.request_id === requestId);
+    if (!req || !req.shared_payload) {
+      alert("Shared payload not available yet.");
+      return;
+    }
+
+    const payload = JSON.parse(req.shared_payload);
+    sharedDataCard.classList.remove("hidden");
+    document.querySelector('[data-tab="tab-discovery"]').click();
+
+    let html = `
+      <div style="background:rgba(16, 185, 129, 0.1); border:1px solid rgba(16,185,129,0.3); border-radius:var(--radius-md); padding:0.85rem; margin-bottom:1rem;">
+        <strong style="color:var(--accent-emerald);">Verified by ${req.to_hospital.toUpperCase()} Admin (${req.reviewer || 'Doctor'})</strong><br>
+        <span style="font-size:0.75rem; color:var(--text-secondary);">Approved Categories: ${req.approved_categories}</span>
+      </div>
+    `;
+
+    if (payload.medical_history) {
+      html += `<h4>🩺 Medical History:</h4>`;
+      payload.medical_history.forEach(h => {
+        html += `<div class="chart-item"><strong>${h.condition}</strong> (${h.icd10}) • ${h.clinical_notes}</div>`;
+      });
+    }
+
+    if (payload.diagnostics) {
+      html += `<h4 style="margin-top:0.75rem;">🔬 Diagnostic Reports:</h4>`;
+      payload.diagnostics.forEach(d => {
+        html += `<div class="chart-item"><strong>${d.biomarker_name}</strong>: ${d.biomarker_value} ${d.unit} (${d.abnormal_flag ? '⚠️ Abnormal' : 'Normal'})</div>`;
+      });
+    }
+
+    if (payload.prescriptions) {
+      html += `<h4 style="margin-top:0.75rem;">💊 Prescriptions:</h4>`;
+      payload.prescriptions.forEach(p => {
+        html += `<div class="chart-item"><strong>${p.medication}</strong> (${p.dosage}) • Outcome: ${p.response_outcome}</div>`;
+      });
+    }
+
+    sharedPayloadView.innerHTML = html;
+    sharedDataCard.scrollIntoView({ behavior: "smooth" });
+  };
+
+  // =========================================================================
+  // 8. Add Patient & Encounters
+  // =========================================================================
+  formRegisterPatient.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const natId = document.getElementById("new-nat-id").value;
+    const name = document.getElementById("new-name").value;
+    const age = document.getElementById("new-age").value;
+    const gender = document.getElementById("new-gender").value;
+    const blood = document.getElementById("new-blood").value;
+    const cond = document.getElementById("new-condition").value;
+    const allergy = document.getElementById("new-allergies").value;
+
+    try {
+      const res = await fetch("/api/patient/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hospital_id: currentHospitalId,
+          national_id: natId,
+          name: name,
+          age: age,
+          gender: gender,
+          blood_group: blood,
+          primary_condition: cond,
+          allergies: allergy
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`✅ Patient "${name}" successfully registered in ${currentHospitalName}!\nBlinded Token: ${data.token}`);
+        formRegisterPatient.reset();
+        fetchLocalPatients();
+      } else {
+        alert("Error: " + data.error);
+      }
+    } catch (err) {
+      alert("Error adding patient: " + err.message);
+    }
+  });
+
+  encCategory.addEventListener("change", (e) => {
+    encDiagFields.classList.add("hidden");
+    encHistoryFields.classList.add("hidden");
+    encRxFields.classList.add("hidden");
+
+    if (e.target.value === "diagnostics") encDiagFields.classList.remove("hidden");
+    if (e.target.value === "medical_history") encHistoryFields.classList.remove("hidden");
+    if (e.target.value === "prescriptions") encRxFields.classList.remove("hidden");
+  });
+
+  formAddEncounter.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const token = encTokenSelect.value;
+    const cat = encCategory.value;
+
+    let payload = {};
+    if (cat === "diagnostics") {
+      payload = {
+        test_name: document.getElementById("enc-diag-name").value,
+        biomarker_name: document.getElementById("enc-biomarker").value,
+        biomarker_value: document.getElementById("enc-val").value,
+        unit: "mg/dL",
+        abnormal_flag: document.getElementById("enc-abnormal").value === "1"
+      };
+    } else if (cat === "medical_history") {
+      payload = {
+        condition: document.getElementById("enc-cond").value,
+        severity: document.getElementById("enc-severity").value,
+        clinical_notes: document.getElementById("enc-notes").value
+      };
+    } else if (cat === "prescriptions") {
+      payload = {
+        medication: document.getElementById("enc-drug").value,
+        dosage: document.getElementById("enc-dose").value,
+        frequency: "Daily"
+      };
+    }
+
+    try {
+      const res = await fetch("/api/patient/encounter/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hospital_id: currentHospitalId,
+          token: token,
+          category: cat,
+          encounter_data: payload
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`✅ Clinical encounter recorded in ${currentHospitalName} local vault!`);
+        fetchLocalPatients();
+      } else {
+        alert("Error recording encounter: " + data.error);
+      }
+    } catch (err) {
+      alert("Error: " + err.message);
+    }
+  });
+
+  // =========================================================================
+  // 9. Analytics & Statistical Studio
+  // =========================================================================
+  analyticsForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    statResultBadge.innerText = "Querying...";
 
     try {
       const res = await fetch("/api/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          condition: document.getElementById("stat-condition").value,
+          medication: document.getElementById("stat-drug").value,
+          response_outcome: document.getElementById("stat-outcome").value,
+          epsilon: parseFloat(document.getElementById("stat-epsilon").value),
+          use_dp: true,
+          use_smpc: true
+        })
       });
       const data = await res.json();
-
-      if (!data.success) {
-        handleQueryError(data);
-      } else {
-        renderResults(data);
-        await fetchAuditBlocks();
-      }
-    } catch (err) {
-      alert("Network or server error while executing query: " + err.message);
-      queryStatusBadge.innerText = "Error";
-      queryStatusBadge.className = "badge badge-rose";
-    } finally {
-      btnRunQuery.disabled = false;
-      btnRunQuery.innerHTML = `<span class="btn-icon">⚡</span> Run Collaborative Query`;
-    }
-  });
-
-  function handleQueryError(data) {
-    resultsPlaceholder.classList.remove("hidden");
-    resultsContent.classList.add("hidden");
-
-    queryStatusBadge.innerText = data.error_type || "Rejected";
-    queryStatusBadge.className = "badge badge-rose";
-
-    if (data.error_type === "ACCESS_DENIED") {
-      alert(`⚠️ Access Denied (PBAC Policy Enforcement):\n\n${data.error}\n\nTip: Adjust your Role or Declared Purpose in the top header.`);
-    } else if (data.error_type === "BUDGET_EXHAUSTED") {
-      alert(`⚠️ Privacy Budget Exhausted:\n\n${data.error}\n\nClick "Reset ε" in the header to restart your research session.`);
-    } else if (data.error_type === "COHORT_SUPPRESSED") {
-      alert(`⚠️ Cell Suppression (HIPAA Safe Harbor Rule):\n\n${data.error}\n\nQueries matching fewer than 5 patients are blocked to prevent individual re-identification.`);
-    } else {
-      alert(`Query Error: ${data.error}`);
-    }
-
-    if (data.budget_status) {
-      updateBudgetUI(data.budget_status);
-    }
-  }
-
-  function renderResults(data) {
-    resultsPlaceholder.classList.add("hidden");
-    resultsContent.classList.remove("hidden");
-
-    queryStatusBadge.innerText = "Success (Privacy-Preserved)";
-    queryStatusBadge.className = "badge badge-emerald";
-
-    const res = data.result;
-    const dp = res.differential_privacy;
-    const smpc = res.smpc;
-
-    // Primary Metric
-    document.getElementById("metric-reported-count").innerText = 
-      dp ? dp.perturbed_value.toFixed(1) : res.reported_count;
-
-    if (dp && dp.confidence_interval_95) {
-      document.getElementById("metric-ci").innerText = 
-        `95% Confidence Interval: [ ${dp.confidence_interval_95.lower} , ${dp.confidence_interval_95.upper} ] (±${dp.confidence_interval_95.margin})`;
-    } else {
-      document.getElementById("metric-ci").innerText = "Differential Privacy Disabled (Raw Count)";
-    }
-
-    // Grid Metrics
-    document.getElementById("metric-true-count").innerText = res.true_count;
-    document.getElementById("metric-noise-added").innerText = dp ? (dp.noise_added > 0 ? `+${dp.noise_added}` : `${dp.noise_added}`) : "0.0";
-    document.getElementById("metric-std-err").innerText = dp ? dp.std_dev.toFixed(2) : "0.0";
-    document.getElementById("metric-epsilon-spent").innerText = dp ? `ε = ${dp.epsilon.toFixed(2)}` : "0.0 (DP Off)";
-    document.getElementById("metric-budget-left").innerText = `Remaining: ${data.budget_status.remaining_budget.toFixed(2)} ε`;
-
-    // Sieve Steps
-    document.getElementById("sieve-a").innerText = res.node_evaluations.hospital_a_matched;
-    document.getElementById("sieve-b").innerText = res.node_evaluations.hospital_b_filtered;
-    document.getElementById("sieve-c").innerText = res.node_evaluations.hospital_c_final;
-
-    // SMPC Trace
-    const smpcBox = document.getElementById("smpc-trace-box");
-    const smpcSteps = document.getElementById("smpc-steps");
-    smpcSteps.innerHTML = "";
-
-    if (smpc && smpc.protocol_trace) {
-      smpcBox.classList.remove("hidden");
-      smpc.protocol_trace.forEach(item => {
-        const div = document.createElement("div");
-        div.className = "trace-step-item";
-        div.innerHTML = `
-          <div class="trace-step-title">${item.step}</div>
-          <div class="trace-step-detail">${item.detail}</div>
+      if (data.success) {
+        statResultBadge.innerText = "Complete";
+        const r = data.result;
+        statResultBox.innerHTML = `
+          <div style="font-size:2rem; font-weight:800; color:var(--accent-cyan);">${r.reported_count} Patients</div>
+          <div style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-secondary);">
+            True Count: ${r.true_count} • Noise: ${r.differential_privacy.noise_added} • ε = ${r.differential_privacy.epsilon}
+          </div>
+          <div style="font-family:var(--font-mono); font-size:0.75rem; color:var(--accent-emerald); margin-top:0.3rem;">
+            95% CI: [ ${r.differential_privacy.confidence_interval_95.lower} , ${r.differential_privacy.confidence_interval_95.upper} ]
+          </div>
         `;
-        smpcSteps.appendChild(div);
-      });
-    } else {
-      smpcBox.classList.add("hidden");
-    }
-
-    // Audit Info
-    document.getElementById("res-audit-index").innerText = data.audit_entry.block_index;
-    document.getElementById("res-audit-hash").innerText = data.audit_entry.block_hash.substring(0, 24) + "...";
-
-    // Update Budget
-    updateBudgetUI(data.budget_status);
-  }
-
-  // ==========================================
-  // 6. Hospital Vault Viewer
-  // ==========================================
-  vaultTabs.forEach(tab => {
-    tab.addEventListener("click", () => {
-      vaultTabs.forEach(t => t.classList.remove("active"));
-      tab.classList.add("active");
-      loadVault(tab.dataset.node);
-    });
-  });
-
-  async function loadVault(nodeId) {
-    try {
-      const res = await fetch(`/api/vault/${nodeId}?limit=12`);
-      const data = await res.json();
-      if (!data.success) return;
-
-      vaultBody.innerHTML = "";
-      if (nodeId === "node_a") {
-        vaultHeaders.innerHTML = `<th>Token</th><th>Age</th><th>Gender</th><th>Condition</th><th>Severity</th>`;
-        data.records.forEach(r => {
-          const tr = document.createElement("tr");
-          tr.innerHTML = `<td><code>${r.token}</code></td><td>${r.age}</td><td>${r.gender}</td><td>${r.condition}</td><td>${r.severity}</td>`;
-          vaultBody.appendChild(tr);
-        });
-      } else if (nodeId === "node_b") {
-        vaultHeaders.innerHTML = `<th>Token</th><th>Biomarker</th><th>Value</th><th>Unit</th><th>Abnormal</th>`;
-        data.records.forEach(r => {
-          const tr = document.createElement("tr");
-          tr.innerHTML = `<td><code>${r.token}</code></td><td>${r.biomarker_name}</td><td>${r.biomarker_value}</td><td>${r.unit}</td><td>${r.abnormal_flag ? '⚠️ Yes' : 'Normal'}</td>`;
-          vaultBody.appendChild(tr);
-        });
-      } else if (nodeId === "node_c") {
-        vaultHeaders.innerHTML = `<th>Token</th><th>Medication</th><th>Dosage</th><th>Adherence</th><th>Response</th>`;
-        data.records.forEach(r => {
-          const tr = document.createElement("tr");
-          tr.innerHTML = `<td><code>${r.token}</code></td><td>${r.medication}</td><td>${r.dosage}</td><td>${Math.round(r.adherence_rate * 100)}%</td><td>${r.response_outcome}</td>`;
-          vaultBody.appendChild(tr);
-        });
       }
     } catch (err) {
-      console.error("Failed to load vault records:", err);
+      console.error(err);
     }
-  }
+  });
 
-  // ==========================================
-  // 7. k-Anonymity Exporter
-  // ==========================================
-  btnExportAnon.addEventListener("click", async () => {
-    btnExportAnon.disabled = true;
-    btnExportAnon.innerText = "Synthesizing Equivalence Classes...";
-
-    const payload = {
-      condition: anonCondition.value,
-      k: parseInt(anonK.value, 10),
-      l: parseInt(anonL.value, 10),
-      role: roleSelect.value,
-      purpose: purposeSelect.value
+  // Helper
+  function debounce(fn, delay) {
+    let timeout;
+    return (...args) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => fn(...args), delay);
     };
-
-    try {
-      const res = await fetch("/api/anonymize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-
-      if (!data.success) {
-        alert("Anonymization Export Failed: " + data.error);
-      } else {
-        renderAnonymizedData(data);
-        await fetchAuditBlocks();
-      }
-    } catch (err) {
-      alert("Error generating anonymized dataset: " + err.message);
-    } finally {
-      btnExportAnon.disabled = false;
-      btnExportAnon.innerText = "Generate Anonymized Dataset";
-    }
-  });
-
-  function renderAnonymizedData(data) {
-    anonResults.classList.remove("hidden");
-    const summary = data.anonymization_summary;
-
-    anonTotalIn.innerText = summary.total_input_records;
-    anonRetained.innerText = summary.retained_records;
-    anonSuppressed.innerText = `${summary.suppressed_records} (${summary.suppression_rate_percent}%)`;
-
-    anonTbody.innerHTML = "";
-    data.sample_records.forEach(r => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td><span class="badge badge-purple">${r.age_group}</span></td>
-        <td>${r.gender}</td>
-        <td>${r.condition}</td>
-        <td>${r.severity}</td>
-        <td><strong>${r.outcome}</strong></td>
-      `;
-      anonTbody.appendChild(tr);
-    });
   }
 
-  // ==========================================
-  // 8. Cryptographic Audit Ledger
-  // ==========================================
-  async function fetchAuditBlocks() {
-    try {
-      const res = await fetch("/api/audit");
-      const data = await res.json();
-      if (!data.success) return;
+  function setupEventListeners() {}
 
-      blocksContainer.innerHTML = "";
-      data.blocks.slice().reverse().forEach(b => {
-        const div = document.createElement("div");
-        div.className = "audit-block-card";
-        div.id = `block-${b.index}`;
-        div.innerHTML = `
-          <div class="block-header">
-            <span>Block #${b.index} • ${b.query_type}</span>
-            <span class="block-time">${new Date(b.timestamp).toLocaleTimeString()}</span>
-          </div>
-          <div class="block-meta">
-            👤 <strong>${b.researcher}</strong> (${b.role}) | 🎯 ${b.purpose} | ε: ${b.epsilon_spent}
-          </div>
-          <div class="block-hash">Hash: ${b.block_hash}</div>
-          <div class="block-prev-hash">Prev: ${b.previous_hash.substring(0, 24)}...</div>
-        `;
-        blocksContainer.appendChild(div);
-      });
-    } catch (err) {
-      console.error("Failed to fetch audit blocks:", err);
-    }
-  }
-
-  btnVerifyChain.addEventListener("click", async () => {
-    try {
-      const res = await fetch("/api/audit/verify", { method: "POST" });
-      const data = await res.json();
-      if (data.success && data.status.valid) {
-        chainIntegrityBadge.innerText = `Chain Valid (${data.status.total_blocks} Blocks)`;
-        chainIntegrityBadge.className = "chain-badge valid";
-        document.getElementById("ledger-pill").className = "node-pill ledger-ok";
-        document.getElementById("ledger-status-text").innerText = "Cryptographically Verified";
-        alert("✅ Cryptographic Verification Passed:\nAll SHA-256 block hashes and chaining pointers are untampered.");
-      } else {
-        chainIntegrityBadge.innerText = `⚠️ Compromised (Block #${data.status.corrupted_block_index})`;
-        chainIntegrityBadge.className = "chain-badge tampered";
-        document.getElementById("ledger-pill").className = "node-pill";
-        document.getElementById("ledger-status-text").innerText = "⚠️ INTEGRITY BREACH DETECTED";
-        alert(`🚨 AUDIT INTEGRITY ALERT:\n\n${data.status.reason}\n\nThe cryptographic hash chain has detected unauthorized retroactive tampering!`);
-      }
-    } catch (err) {
-      console.error("Error verifying audit chain:", err);
-    }
-  });
-
-  btnSimulateTamper.addEventListener("click", async () => {
-    try {
-      // Tamper with Block #1
-      const res = await fetch("/api/audit/tamper", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ block_index: 1, fake_researcher: "MALICIOUS_INSIDER" })
-      });
-      const data = await res.json();
-      if (data.success) {
-        btnRestoreChain.classList.remove("hidden");
-        btnRestoreChain.dataset.orig = data.original_field;
-        await fetchAuditBlocks();
-        // Immediately run verify to demonstrate detection
-        btnVerifyChain.click();
-      }
-    } catch (err) {
-      console.error("Tamper simulation error:", err);
-    }
-  });
-
-  btnRestoreChain.addEventListener("click", async () => {
-    try {
-      const orig = btnRestoreChain.dataset.orig || "Dr. Clinical Investigator";
-      const res = await fetch("/api/audit/restore", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ block_index: 1, original_researcher: orig })
-      });
-      const data = await res.json();
-      if (data.success) {
-        btnRestoreChain.classList.add("hidden");
-        await fetchAuditBlocks();
-        btnVerifyChain.click();
-      }
-    } catch (err) {
-      console.error("Restore block error:", err);
-    }
-  });
-
-  // Start initialization
+  // Run initialization
   init();
 });

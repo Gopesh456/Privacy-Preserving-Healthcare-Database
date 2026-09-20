@@ -1,6 +1,12 @@
 """
 Backend API Server for Privacy-Preserving Healthcare Database.
-Uses Starlette + Uvicorn to serve REST APIs and the interactive frontend.
+Serves REST APIs for:
+- Hospital Admin Authentication (Hospital A, B, C)
+- Local Patient Record Management (EHR, Labs, Prescriptions)
+- Privacy-Preserving Inter-Hospital Discovery & Availability
+- Granular Scoped Sharing Requests, Review, and Verification
+- Top-bar Real-Time Notifications
+- Federated Statistical DP & SMPC Analytics
 """
 
 import json
@@ -13,11 +19,177 @@ from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 
 from backend.federation.orchestrator import FederatedOrchestrator
+from backend.database.hospital_nodes import get_hospital_node
+from backend.database.federation_db import FederationCoordinator
+from backend.database.tokens import generate_blinded_token
 
 orchestrator = FederatedOrchestrator(total_epsilon_budget=10.0)
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
+# =========================================================================
+# Authentication & Hospital Session Endpoints
+# =========================================================================
+async def auth_login(request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    username = data.get("username", "")
+    password = data.get("password", "")
+
+    user = FederationCoordinator.authenticate(username, password)
+    if not user:
+        return JSONResponse({"success": False, "error": "Invalid hospital admin credentials."}, status_code=401)
+
+    return JSONResponse({"success": True, "user": user})
+
+# =========================================================================
+# Local Patient Management Endpoints
+# =========================================================================
+async def search_local_patients(request):
+    hospital_id = request.query_params.get("hospital_id", "node_a")
+    q = request.query_params.get("q", "")
+    node = get_hospital_node(hospital_id)
+    if not node:
+        return JSONResponse({"success": False, "error": "Unknown hospital node."}, status_code=404)
+
+    patients = node.search_local_patients(q)
+    return JSONResponse({"success": True, "hospital_id": hospital_id, "patients": patients})
+
+async def get_patient_profile(request):
+    hospital_id = request.query_params.get("hospital_id", "node_a")
+    token = request.query_params.get("token", "")
+    node = get_hospital_node(hospital_id)
+    if not node:
+        return JSONResponse({"success": False, "error": "Unknown hospital node."}, status_code=404)
+
+    profile = node.get_patient_full_profile(token)
+    if not profile:
+        return JSONResponse({"success": False, "error": "Patient profile not found in local database."}, status_code=404)
+
+    return JSONResponse({"success": True, "profile": profile})
+
+async def add_new_patient(request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    hospital_id = data.get("hospital_id", "node_a")
+    node = get_hospital_node(hospital_id)
+    if not node:
+        return JSONResponse({"success": False, "error": "Unknown hospital node."}, status_code=404)
+
+    nat_id = data.get("national_id", "")
+    if not nat_id:
+        return JSONResponse({"success": False, "error": "National ID / MRN is required."}, status_code=400)
+
+    token = generate_blinded_token(nat_id)
+    patient_record = {
+        "national_id": nat_id,
+        "token": token,
+        "name": data.get("name", "Unknown"),
+        "age": int(data.get("age", 30)),
+        "gender": data.get("gender", "Other"),
+        "blood_group": data.get("blood_group", "Unknown"),
+        "allergies": data.get("allergies", "None Known"),
+        "primary_condition": data.get("primary_condition", "Under Evaluation")
+    }
+
+    res = node.register_patient(patient_record)
+    return JSONResponse({"success": True, "token": token, "patient_id": res["patient_id"]})
+
+async def add_clinical_encounter(request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    hospital_id = data.get("hospital_id", "node_a")
+    category = data.get("category", "")
+    token = data.get("token", "")
+    payload = data.get("encounter_data", {})
+
+    node = get_hospital_node(hospital_id)
+    if not node:
+        return JSONResponse({"success": False, "error": "Unknown hospital node."}, status_code=404)
+
+    res = node.add_clinical_encounter(category, token, payload)
+    return JSONResponse(res)
+
+# =========================================================================
+# Privacy-Preserving Discovery & Presence Locator
+# =========================================================================
+async def discover_patient(request):
+    hospital_id = request.query_params.get("hospital_id", "node_a")
+    q = request.query_params.get("q", "")
+    if not q:
+        return JSONResponse({"success": False, "error": "Search query is required."}, status_code=400)
+
+    report = orchestrator.discover_patient(hospital_id, q)
+    return JSONResponse({"success": True, "discovery": report})
+
+# =========================================================================
+# Granular Data Sharing & Verification Workflow
+# =========================================================================
+async def create_sharing_request(request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    res = orchestrator.request_patient_data(
+        from_hospital=data.get("from_hospital", "node_b"),
+        to_hospital=data.get("to_hospital", "node_a"),
+        patient_token=data.get("patient_token", ""),
+        patient_name=data.get("patient_name", "Patient"),
+        requested_categories=data.get("requested_categories", []),
+        purpose=data.get("purpose", "CONTINUATION_OF_CARE"),
+        justification=data.get("justification", "Clinical care continuity requirement."),
+        requester_role="HOSPITAL_ADMIN"
+    )
+    return JSONResponse(res)
+
+async def review_sharing_request(request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    res = orchestrator.review_patient_data_request(
+        request_id=data.get("request_id", ""),
+        reviewer_hospital=data.get("reviewer_hospital", "node_a"),
+        reviewer_name=data.get("reviewer_name", "Hospital Admin"),
+        decision=data.get("decision", "APPROVED"),
+        approved_categories=data.get("approved_categories", [])
+    )
+    return JSONResponse(res)
+
+async def get_hospital_sharing_requests(request):
+    hospital_id = request.query_params.get("hospital_id", "node_a")
+    requests = FederationCoordinator.get_requests_for_hospital(hospital_id)
+    return JSONResponse({"success": True, "requests": requests})
+
+# =========================================================================
+# Notifications Endpoints
+# =========================================================================
+async def get_notifications(request):
+    hospital_id = request.query_params.get("hospital_id", "node_a")
+    notifs = FederationCoordinator.get_notifications(hospital_id)
+    unread_count = sum(1 for n in notifs if n["is_read"] == 0)
+    return JSONResponse({"success": True, "notifications": notifs, "unread_count": unread_count})
+
+async def mark_notifications_read(request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    hospital_id = data.get("hospital_id", "node_a")
+    FederationCoordinator.mark_notifications_read(hospital_id)
+    return JSONResponse({"success": True})
+
+# =========================================================================
+# Existing Node Stats, Vault, Analytics & Audit Endpoints
+# =========================================================================
 async def get_nodes(request):
     nodes = orchestrator.get_nodes_info()
     return JSONResponse({"success": True, "nodes": nodes})
@@ -25,14 +197,10 @@ async def get_nodes(request):
 async def inspect_vault(request):
     node_id = request.path_params.get("node_id")
     limit = int(request.query_params.get("limit", 15))
-    if node_id == "node_a":
-        records = orchestrator.node_a.inspect_local_vault(limit)
-    elif node_id == "node_b":
-        records = orchestrator.node_b.inspect_local_vault(limit)
-    elif node_id == "node_c":
-        records = orchestrator.node_c.inspect_local_vault(limit)
-    else:
+    node = get_hospital_node(node_id)
+    if not node:
         return JSONResponse({"success": False, "error": f"Unknown node: {node_id}"}, status_code=404)
+    records = node.inspect_local_vault(limit)
     return JSONResponse({"success": True, "node_id": node_id, "limit": limit, "records": records})
 
 async def execute_query(request):
@@ -115,6 +283,22 @@ async def serve_index(request):
 
 routes = [
     Route("/", serve_index),
+    # Hospital Auth & Sessions
+    Route("/api/auth/login", auth_login, methods=["POST"]),
+    # Patient Records & Discovery
+    Route("/api/patient/search", search_local_patients, methods=["GET"]),
+    Route("/api/patient/profile", get_patient_profile, methods=["GET"]),
+    Route("/api/patient/discover", discover_patient, methods=["GET"]),
+    Route("/api/patient/add", add_new_patient, methods=["POST"]),
+    Route("/api/patient/encounter/add", add_clinical_encounter, methods=["POST"]),
+    # Inter-Hospital Sharing Requests & Review
+    Route("/api/sharing/request", create_sharing_request, methods=["POST"]),
+    Route("/api/sharing/review", review_sharing_request, methods=["POST"]),
+    Route("/api/sharing/requests", get_hospital_sharing_requests, methods=["GET"]),
+    # Top-bar Notifications
+    Route("/api/notifications", get_notifications, methods=["GET"]),
+    Route("/api/notifications/mark-read", mark_notifications_read, methods=["POST"]),
+    # Federation stats, vault, analytics & audit
     Route("/api/nodes", get_nodes, methods=["GET"]),
     Route("/api/vault/{node_id}", inspect_vault, methods=["GET"]),
     Route("/api/query", execute_query, methods=["POST"]),
@@ -136,4 +320,4 @@ app = Starlette(debug=True, routes=routes, middleware=middleware)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("backend.server:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("backend.server:app", host="127.0.0.1", port=8000, reload=False)

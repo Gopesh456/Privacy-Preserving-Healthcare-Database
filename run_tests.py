@@ -37,14 +37,20 @@ def run_all_tests():
     print("  -> Genesis creation, SHA-256 hash chaining, and tamper detection PASSED.")
 
     # Run Federation tests
-    print("\n[4/4] Testing Federated Multi-Hospital Orchestrator...")
+    print("\n[4/5] Testing Federated Multi-Hospital Orchestrator...")
     t4.test_federated_joint_query_user_example()
     t4.test_pbac_authorization_rejection()
     t4.test_k_anonymity_export()
     print("  -> Multi-hospital joint queries, PBAC, and k-anonymity export PASSED.")
 
+    # Run Inter-Hospital Sharing tests
+    print("\n[5/5] Testing Inter-Hospital Discovery, Request & Verification Workflow...")
+    import tests.test_inter_hospital_sharing as t5
+    t5.test_inter_hospital_discovery_and_sharing_flow()
+    print("  -> Privacy-preserving discovery, scoped requests, and verified data release PASSED.")
+
     print("\n======================================================================")
-    print("ALL TEST SUITES PASSED (11/11)")
+    print("ALL TEST SUITES PASSED (12/12)")
     print("======================================================================")
     return True
 

@@ -1,15 +1,22 @@
 """
-Federated Query Orchestrator.
-Coordinates the Defense-in-Depth Privacy Pipeline across:
-- Hospital A (Medical History)
-- Hospital B (Diagnostics & Labs)
-- Hospital C (Pharmacy & Prescriptions)
-Integrates PBAC Access Control, Blinded Token Linkage, SMPC Secret Sharing,
-Differential Privacy (Laplace/Gaussian), and the Cryptographic Audit Ledger.
+Federated Query Orchestrator & Inter-Hospital Exchange Hub.
+Coordinates:
+1. Privacy-Preserving Patient Discovery across independent hospital nodes.
+2. Inter-hospital Data Sharing Requests with review & verification workflow.
+3. Defense-in-Depth statistical queries with Differential Privacy and SMPC.
+4. Tamper-evident Audit Ledger tracking for all queries and sharing events.
 """
 
 from typing import Dict, Any, Optional, List
-from backend.database.hospital_nodes import HospitalANode, HospitalBNode, HospitalCNode
+from backend.database.hospital_nodes import (
+    HospitalNode,
+    hospital_a_node,
+    hospital_b_node,
+    hospital_c_node,
+    get_hospital_node
+)
+from backend.database.federation_db import FederationCoordinator
+from backend.database.tokens import generate_blinded_token
 from backend.privacy.differential_privacy import (
     DifferentialPrivacyEngine,
     PrivacyBudgetExhaustedError,
@@ -22,9 +29,9 @@ from backend.security.audit_ledger import AuditLedger
 
 class FederatedOrchestrator:
     def __init__(self, total_epsilon_budget: float = 10.0):
-        self.node_a = HospitalANode()
-        self.node_b = HospitalBNode()
-        self.node_c = HospitalCNode()
+        self.node_a = hospital_a_node
+        self.node_b = hospital_b_node
+        self.node_c = hospital_c_node
 
         self.dp_engine = DifferentialPrivacyEngine(total_epsilon_budget=total_epsilon_budget)
         self.smpc = SMPCSecureAggregator()
@@ -38,9 +45,200 @@ class FederatedOrchestrator:
             self.node_c.get_stats()
         ]
 
+    # =========================================================================
+    # Patient Discovery & Zero-Knowledge Presence Locator
+    # =========================================================================
+    def discover_patient(self, current_hospital_id: str, query: str) -> Dict[str, Any]:
+        """
+        Searches for a patient:
+        1. Checks current hospital's local database.
+        2. If not found locally (or to check federation availability), queries peer
+           hospitals via blinded tokens.
+        3. Returns a privacy-preserving presence report without leaking clinical contents.
+        """
+        current_node = get_hospital_node(current_hospital_id) or self.node_a
+        all_nodes = [self.node_a, self.node_b, self.node_c]
+
+        # 1. Search locally
+        local_matches = current_node.search_local_patients(query)
+        target_token = None
+        target_name = None
+
+        if local_matches:
+            target_token = local_matches[0]["token"]
+            target_name = local_matches[0]["name"]
+            local_profile = current_node.get_patient_full_profile(target_token)
+            local_present = True
+        else:
+            # If query is a national ID or token directly, or search across peer names
+            if query.startswith("pt_"):
+                target_token = query
+            elif query.upper().startswith("NAT-"):
+                target_token = generate_blinded_token(query.upper())
+            else:
+                # Blind lookup helper: find matching token from any node for demonstration
+                for node in all_nodes:
+                    peer_matches = node.search_local_patients(query)
+                    if peer_matches:
+                        target_token = peer_matches[0]["token"]
+                        target_name = peer_matches[0]["name"]
+                        break
+
+            local_profile = None
+            local_present = False
+
+        if not target_token:
+            return {
+                "search_query": query,
+                "found_anywhere": False,
+                "message": f"No patient records matching '{query}' found anywhere in the hospital network."
+            }
+
+        # 2. Query presence at all nodes
+        peer_presence = []
+        for node in all_nodes:
+            presence_info = node.check_patient_presence(target_token)
+            is_local = (node.node_id == current_hospital_id)
+            peer_presence.append({
+                "hospital_id": node.node_id,
+                "hospital_name": node.name,
+                "is_current_hospital": is_local,
+                "present": presence_info["present"],
+                "categories": presence_info["categories"],
+                "patient_name_masked": presence_info["patient_name_masked"] or (target_name if is_local else None),
+                "can_request": (not is_local and presence_info["present"])
+            })
+
+        found_anywhere = any(p["present"] for p in peer_presence)
+
+        return {
+            "search_query": query,
+            "patient_token": target_token,
+            "patient_name": target_name,
+            "local_present": local_present,
+            "local_profile": local_profile,
+            "found_anywhere": found_anywhere,
+            "federation_presence": peer_presence
+        }
+
+    # =========================================================================
+    # Granular Inter-Hospital Data Sharing & Verification
+    # =========================================================================
+    def request_patient_data(
+        self,
+        from_hospital: str,
+        to_hospital: str,
+        patient_token: str,
+        patient_name: str,
+        requested_categories: List[str],
+        purpose: str,
+        justification: str,
+        requester_role: str = "HOSPITAL_ADMIN"
+    ) -> Dict[str, Any]:
+        """
+        Hospital B submits a scoped request to Hospital A for specific patient data.
+        """
+        # Validate purpose and permissions
+        auth = AccessControlPolicy.validate_request(
+            role=requester_role,
+            purpose=purpose,
+            requested_epsilon=0.0
+        )
+        if not auth["authorized"]:
+            return {"success": False, "error": auth["reason"]}
+
+        if not requested_categories:
+            return {"success": False, "error": "At least one data category must be selected."}
+
+        res = FederationCoordinator.create_request(
+            from_hospital=from_hospital,
+            to_hospital=to_hospital,
+            patient_token=patient_token,
+            patient_name=patient_name,
+            requested_categories=requested_categories,
+            purpose=purpose,
+            justification=justification
+        )
+
+        # Log in audit ledger
+        self.audit_ledger.log_query(
+            researcher=f"Admin ({from_hospital.upper()})",
+            role=requester_role,
+            purpose=purpose,
+            query_type="INTER_HOSPITAL_DATA_REQUESTED",
+            query_parameters={
+                "request_id": res["request_id"],
+                "from_hospital": from_hospital,
+                "to_hospital": to_hospital,
+                "patient_token": patient_token,
+                "categories": requested_categories,
+                "justification": justification
+            },
+            participating_nodes=[from_hospital, to_hospital],
+            epsilon_spent=0.0
+        )
+
+        return res
+
+    def review_patient_data_request(
+        self,
+        request_id: str,
+        reviewer_hospital: str,
+        reviewer_name: str,
+        decision: str,  # 'APPROVED' or 'REJECTED'
+        approved_categories: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Target Hospital Admin reviews, verifies, and approves/rejects sharing.
+        Only the verified and approved categories are extracted.
+        """
+        extracted_payload = None
+        target_node = get_hospital_node(reviewer_hospital)
+
+        if decision == "APPROVED":
+            if not approved_categories:
+                return {"success": False, "error": "At least one category must be approved for release."}
+
+            # Retrieve request from DB to get patient token
+            requests = FederationCoordinator.get_requests_for_hospital(reviewer_hospital)
+            target_req = next((r for r in requests["incoming"] if r["request_id"] == request_id), None)
+            if not target_req:
+                return {"success": False, "error": "Request not found in incoming queue."}
+
+            token = target_req["patient_token"]
+            extracted_payload = target_node.extract_scoped_records(token, approved_categories)
+
+        review_res = FederationCoordinator.review_request(
+            request_id=request_id,
+            reviewer_hospital=reviewer_hospital,
+            reviewer_name=reviewer_name,
+            decision=decision,
+            approved_categories=approved_categories,
+            extracted_payload=extracted_payload
+        )
+
+        # Log review in audit ledger
+        self.audit_ledger.log_query(
+            researcher=reviewer_name,
+            role=f"{reviewer_hospital.upper()}_ADMIN",
+            purpose="DATA_SHARING_VERIFICATION",
+            query_type="DATA_SHARING_APPROVED" if decision == "APPROVED" else "DATA_SHARING_REJECTED",
+            query_parameters={
+                "request_id": request_id,
+                "decision": decision,
+                "approved_categories": approved_categories or []
+            },
+            participating_nodes=[reviewer_hospital],
+            epsilon_spent=0.0
+        )
+
+        return review_res
+
+    # =========================================================================
+    # Statistical Federated Queries (SMPC + Differential Privacy)
+    # =========================================================================
     def execute_collaborative_query(
         self,
-        # Query filters
         condition: Optional[str] = None,
         severity: Optional[str] = None,
         biomarker: Optional[str] = None,
@@ -50,7 +248,6 @@ class FederatedOrchestrator:
         medication: Optional[str] = None,
         response_outcome: Optional[str] = None,
         min_adherence: Optional[float] = None,
-        # Privacy & Security configuration
         epsilon: float = 1.0,
         use_dp: bool = True,
         use_smpc: bool = True,
@@ -60,10 +257,10 @@ class FederatedOrchestrator:
         enforce_suppression: bool = True
     ) -> Dict[str, Any]:
         """
-        Executes a distributed healthcare query across Hospital A, B, and C.
+        Executes a privacy-preserving statistical query across the hospital nodes.
         """
         query_summary = (
-            f"Query [Condition: {condition or 'Any'}, "
+            f"Federated Query [Condition: {condition or 'Any'}, "
             f"Biomarker: {biomarker or 'Any'}, "
             f"Medication: {medication or 'Any'}, "
             f"Outcome: {response_outcome or 'Any'}]"
@@ -95,54 +292,56 @@ class FederatedOrchestrator:
                     "budget_status": self.dp_engine.get_budget_status()
                 }
 
-        # 3. Federated Sub-Query Dispatch (Each node evaluates inside its local enclave)
-        # Hospital A: Finds matching blinded tokens based on Medical History
-        tokens_a = self.node_a.query_matching_tokens(condition=condition, severity=severity)
-        set_a = set(tokens_a)
+        # 3. Federated Local Evaluations across all three hospitals
+        matched_tokens = set()
+        hospital_matches = {}
 
-        # Hospital B: Evaluates Diagnostic Reports
-        # Only evaluates if biomarker criteria are provided; otherwise matches all candidate tokens
-        if biomarker or abnormal_lab_only or biomarker_max is not None or biomarker_min is not None:
-            tokens_b = self.node_b.query_matching_tokens(
-                candidate_tokens=list(set_a),
-                biomarker=biomarker,
-                abnormal_only=abnormal_lab_only,
-                max_value=biomarker_max,
-                min_value=biomarker_min
-            )
-            set_ab = set_a.intersection(tokens_b)
-        else:
-            set_ab = set_a
+        for node in [self.node_a, self.node_b, self.node_c]:
+            with node.get_connection() as conn:
+                cursor = conn.cursor()
+                # Query matching tokens across local clinical tables
+                sql = """
+                SELECT DISTINCT p.token
+                FROM patients p
+                LEFT JOIN medical_history m ON p.token = m.token
+                LEFT JOIN diagnostics d ON p.token = d.token
+                LEFT JOIN prescriptions r ON p.token = r.token
+                WHERE 1=1
+                """
+                params = []
+                if condition:
+                    sql += " AND (p.primary_condition = ? OR m.condition = ?)"
+                    params.extend([condition, condition])
+                if severity:
+                    sql += " AND m.severity = ?"
+                    params.append(severity)
+                if biomarker:
+                    sql += " AND d.biomarker_name = ?"
+                    params.append(biomarker)
+                if abnormal_lab_only:
+                    sql += " AND d.abnormal_flag = 1"
+                if medication:
+                    sql += " AND r.medication = ?"
+                    params.append(medication)
+                if response_outcome:
+                    sql += " AND r.response_outcome = ?"
+                    params.append(response_outcome)
 
-        # Hospital C: Evaluates Prescriptions and Outcomes
-        if medication or response_outcome or min_adherence is not None:
-            tokens_c = self.node_c.query_matching_tokens(
-                candidate_tokens=list(set_ab),
-                medication=medication,
-                response_outcome=response_outcome,
-                min_adherence=min_adherence
-            )
-            final_tokens = set_ab.intersection(tokens_c)
-        else:
-            final_tokens = set_ab
+                node_tokens = [r[0] for r in cursor.execute(sql, params).fetchall()]
+                hospital_matches[node.name] = len(node_tokens)
+                matched_tokens.update(node_tokens)
 
-        true_count = len(final_tokens)
+        true_count = len(matched_tokens)
 
-        # 4. Secure Multi-Party Computation (SMPC) Simulation
-        # Demonstrates additive secret sharing among nodes to sum cross-node cohort segments
+        # 4. SMPC Simulation
         smpc_result = None
         if use_smpc:
-            # Simulate each hospital's local partitioned contribution
-            # e.g., cohort count split across participating regional facilities
-            part_a = true_count // 3
-            part_b = true_count // 3
-            part_c = true_count - (part_a + part_b)
-            node_shares_input = {
-                "Hospital_A": part_a,
-                "Hospital_B": part_b,
-                "Hospital_C": part_c
+            smpc_inputs = {
+                "Hospital_A": hospital_matches.get(self.node_a.name, 0),
+                "Hospital_B": hospital_matches.get(self.node_b.name, 0),
+                "Hospital_C": hospital_matches.get(self.node_c.name, 0)
             }
-            smpc_result = self.smpc.run_secure_sum(node_shares_input)
+            smpc_result = self.smpc.run_secure_sum(smpc_inputs)
 
         # 5. Differential Privacy Perturbation
         dp_result = None
@@ -163,14 +362,7 @@ class FederatedOrchestrator:
                     "budget_status": self.dp_engine.get_budget_status()
                 }
 
-        # 6. Cryptographic Audit Ledger Recording
-        participating = ["Hospital A (EHR)"]
-        if biomarker or abnormal_lab_only or biomarker_max is not None:
-            participating.append("Hospital B (Labs)")
-        if medication or response_outcome or min_adherence is not None:
-            participating.append("Hospital C (Pharmacy)")
-
-        spent_epsilon = epsilon if use_dp else 0.0
+        # 6. Cryptographic Audit Recording
         audit_block = self.audit_ledger.log_query(
             researcher=researcher_name,
             role=role,
@@ -178,7 +370,6 @@ class FederatedOrchestrator:
             query_type="FEDERATED_COHORT_QUERY",
             query_parameters={
                 "condition": condition,
-                "severity": severity,
                 "biomarker": biomarker,
                 "medication": medication,
                 "response_outcome": response_outcome,
@@ -186,8 +377,8 @@ class FederatedOrchestrator:
                 "use_smpc": use_smpc,
                 "use_dp": use_dp
             },
-            participating_nodes=participating,
-            epsilon_spent=spent_epsilon
+            participating_nodes=["Hospital A", "Hospital B", "Hospital C"],
+            epsilon_spent=epsilon if use_dp else 0.0
         )
 
         return {
@@ -195,13 +386,13 @@ class FederatedOrchestrator:
             "query_summary": query_summary,
             "result": {
                 "reported_count": dp_result["perturbed_value"] if use_dp else true_count,
-                "true_count": true_count,  # Provided for demonstration comparison
+                "true_count": true_count,
                 "differential_privacy": dp_result,
                 "smpc": smpc_result,
                 "node_evaluations": {
-                    "hospital_a_matched": len(set_a),
-                    "hospital_b_filtered": len(set_ab),
-                    "hospital_c_final": true_count
+                    "hospital_a_matched": hospital_matches.get(self.node_a.name, 0),
+                    "hospital_b_filtered": hospital_matches.get(self.node_b.name, 0),
+                    "hospital_c_final": hospital_matches.get(self.node_c.name, 0)
                 }
             },
             "privacy_mode": {
@@ -226,41 +417,26 @@ class FederatedOrchestrator:
         k: int = 5,
         l: int = 2
     ) -> Dict[str, Any]:
-        """
-        Exports a k-anonymized cohort dataset with quasi-identifier generalization
-        and small-class suppression.
-        """
-        auth_result = AccessControlPolicy.validate_request(
-            role=role,
-            purpose=purpose,
-            requested_epsilon=0.0,
-            is_export=True
-        )
-        if not auth_result["authorized"]:
-            return {"success": False, "error": auth_result["reason"]}
-
-        # Query tokens from Hospital A
-        tokens = self.node_a.query_matching_tokens(condition=condition)
-        if not tokens:
-            return {"success": False, "error": "No patient records match the specified criteria."}
-
-        # Retrieve attributes from Hospital A and Hospital C for matched tokens
-        records_a = self.node_a.get_cohort_attributes(tokens)
-        prescriptions_c = {p["token"]: p for p in self.node_c.get_cohort_prescriptions(tokens)}
-
-        # Merge in memory purely for anonymizer pipeline
         merged_raw = []
-        for r in records_a:
-            tok = r["token"]
-            rx = prescriptions_c.get(tok, {})
-            merged_raw.append({
-                "age": r["age"],
-                "gender": r["gender"],
-                "condition": r["condition"],
-                "severity": r["severity"],
-                "medication": rx.get("medication", "None"),
-                "outcome": rx.get("response_outcome", "Unknown")
-            })
+        for node in [self.node_a, self.node_b, self.node_c]:
+            with node.get_connection() as conn:
+                cursor = conn.cursor()
+                query_sql = """
+                SELECT p.age, p.gender, p.primary_condition as condition,
+                       COALESCE(m.severity, 'Moderate') as severity,
+                       COALESCE(r.medication, 'None') as medication,
+                       COALESCE(r.response_outcome, 'Unknown') as outcome
+                FROM patients p
+                LEFT JOIN medical_history m ON p.token = m.token
+                LEFT JOIN prescriptions r ON p.token = r.token
+                WHERE 1=1
+                """
+                params = []
+                if condition:
+                    query_sql += " AND p.primary_condition = ?"
+                    params.append(condition)
+                rows = cursor.execute(query_sql, params).fetchall()
+                merged_raw.extend([dict(r) for r in rows])
 
         self.anonymizer.k_threshold = k
         self.anonymizer.l_threshold = l
@@ -270,14 +446,13 @@ class FederatedOrchestrator:
             sensitive_attribute="outcome"
         )
 
-        # Log audit entry
         self.audit_ledger.log_query(
             researcher=researcher_name,
             role=role,
             purpose=purpose,
             query_type="K_ANONYMITY_MICRODATA_EXPORT",
             query_parameters={"condition": condition, "k": k, "l": l},
-            participating_nodes=["Hospital A", "Hospital C"],
+            participating_nodes=["Hospital A", "Hospital B", "Hospital C"],
             epsilon_spent=0.0
         )
 

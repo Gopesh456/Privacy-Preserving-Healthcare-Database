@@ -7,37 +7,76 @@ with appropriate privacy budgets and authorization constraints.
 from typing import Dict, Any, List, Optional
 
 ROLES_PERMISSIONS = {
+    "HOSPITAL_ADMIN": {
+        "description": "Hospital Medical Administrator",
+        "max_epsilon_per_query": 5.0,
+        "allowed_purposes": ["CONTINUATION_OF_CARE", "EMERGENCY_TREATMENT", "SECOND_OPINION", "CLINICAL_RESEARCH", "TREATMENT_EFFICACY"],
+        "can_anonymize_export": True,
+        "can_view_audit": True,
+        "can_request_data": True
+    },
+    "HOSPITAL_A_ADMIN": {
+        "description": "Hospital A Medical Administrator",
+        "max_epsilon_per_query": 5.0,
+        "allowed_purposes": ["CONTINUATION_OF_CARE", "EMERGENCY_TREATMENT", "SECOND_OPINION", "CLINICAL_RESEARCH", "TREATMENT_EFFICACY"],
+        "can_anonymize_export": True,
+        "can_view_audit": True,
+        "can_request_data": True
+    },
+    "HOSPITAL_B_ADMIN": {
+        "description": "Hospital B Medical Administrator",
+        "max_epsilon_per_query": 5.0,
+        "allowed_purposes": ["CONTINUATION_OF_CARE", "EMERGENCY_TREATMENT", "SECOND_OPINION", "CLINICAL_RESEARCH", "TREATMENT_EFFICACY"],
+        "can_anonymize_export": True,
+        "can_view_audit": True,
+        "can_request_data": True
+    },
+    "HOSPITAL_C_ADMIN": {
+        "description": "Hospital C Medical Administrator",
+        "max_epsilon_per_query": 5.0,
+        "allowed_purposes": ["CONTINUATION_OF_CARE", "EMERGENCY_TREATMENT", "SECOND_OPINION", "CLINICAL_RESEARCH", "TREATMENT_EFFICACY"],
+        "can_anonymize_export": True,
+        "can_view_audit": True,
+        "can_request_data": True
+    },
     "CHIEF_MEDICAL_OFFICER": {
         "description": "Hospital Network Medical Director",
         "max_epsilon_per_query": 5.0,
-        "allowed_purposes": ["CLINICAL_RESEARCH", "TREATMENT_EFFICACY", "SAFETY_SURVEILLANCE", "EMERGENCY_EPIDEMIOLOGY"],
+        "allowed_purposes": ["CONTINUATION_OF_CARE", "EMERGENCY_TREATMENT", "SECOND_OPINION", "CLINICAL_RESEARCH", "TREATMENT_EFFICACY", "SAFETY_SURVEILLANCE", "EMERGENCY_EPIDEMIOLOGY"],
         "can_anonymize_export": True,
-        "can_view_audit": True
+        "can_view_audit": True,
+        "can_request_data": True
     },
     "CLINICAL_RESEARCHER": {
         "description": "Academic / Hospital Clinical Investigator",
         "max_epsilon_per_query": 2.5,
         "allowed_purposes": ["CLINICAL_RESEARCH", "TREATMENT_EFFICACY"],
         "can_anonymize_export": True,
-        "can_view_audit": False
+        "can_view_audit": False,
+        "can_request_data": False
     },
     "PHARMACOVIGILANCE_ANALYST": {
         "description": "Drug Safety and Post-Marketing Surveillance Specialist",
         "max_epsilon_per_query": 2.0,
         "allowed_purposes": ["SAFETY_SURVEILLANCE", "TREATMENT_EFFICACY"],
         "can_anonymize_export": False,
-        "can_view_audit": False
+        "can_view_audit": False,
+        "can_request_data": False
     },
     "EXTERNAL_AUDITOR": {
         "description": "HIPAA / GDPR Compliance & Ledger Auditor",
         "max_epsilon_per_query": 0.0,  # Cannot execute clinical queries
         "allowed_purposes": ["COMPLIANCE_AUDIT"],
         "can_anonymize_export": False,
-        "can_view_audit": True
+        "can_view_audit": True,
+        "can_request_data": False
     }
 }
 
 VALID_PURPOSES = [
+    "CONTINUATION_OF_CARE",
+    "EMERGENCY_TREATMENT",
+    "SECOND_OPINION",
     "CLINICAL_RESEARCH",
     "TREATMENT_EFFICACY",
     "SAFETY_SURVEILLANCE",
