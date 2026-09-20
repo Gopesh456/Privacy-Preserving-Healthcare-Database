@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PP-HDB: Privacy-Preserving Healthcare Database</title>
+  <meta name="description" content="Federated multi-institution healthcare database system enabling collaborative medical queries with Differential Privacy, SMPC, and Cryptographic Audit Trails.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Header / Navigation Bar -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="logo-badge">
+        <svg class="shield-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="M9 12h6M12 9v6" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div>
+        <h1 class="app-title">PP-HDB <span class="badge-tag">Federated Privacy Engine</span></h1>
+        <p class="app-subtitle">Multi-Institution Healthcare Analytics without Patient Record Disclosure</p>
+      </div>
+    </div>
+
+    <div class="header-controls">
+      <!-- Role & Purpose Selectors (PBAC) -->
+      <div class="control-group">
+        <label for="role-select">Active Role (RBAC)</label>
+        <select id="role-select" class="custom-select">
+          <option value="CLINICAL_RESEARCHER">Clinical Researcher</option>
+          <option value="CHIEF_MEDICAL_OFFICER">Chief Medical Officer</option>
+          <option value="PHARMACOVIGILANCE_ANALYST">Pharmacovigilance Analyst</option>
+          <option value="EXTERNAL_AUDITOR">External Auditor</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label for="purpose-select">Declared Purpose (PBAC)</label>
+        <select id="purpose-select" class="custom-select">
+          <option value="CLINICAL_RESEARCH">Clinical Research</option>
+          <option value="TREATMENT_EFFICACY">Treatment Efficacy</option>
+          <option value="SAFETY_SURVEILLANCE">Safety Surveillance</option>
+          <option value="EMERGENCY_EPIDEMIOLOGY">Emergency Epidemiology</option>
+          <option value="COMPLIANCE_AUDIT">Compliance Audit</option>
+        </select>
+      </div>
+
+      <!-- Privacy Budget Meter -->
+      <div class="budget-card" id="budget-card">
+        <div class="budget-info">
+          <span class="budget-label">Privacy Budget (ε)</span>
+          <span class="budget-val" id="budget-val">10.0 / 10.0</span>
+        </div>
+        <div class="budget-bar-bg">
+          <div class="budget-bar-fill" id="budget-bar-fill" style="width: 100%;"></div>
+        </div>
+        <button id="btn-reset-budget" class="btn-xs" title="Reset session privacy budget">Reset ε</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Network Health Ribbon -->
+  <div class="status-ribbon">
+    <div class="node-pill online" id="node-a-pill">
+      <span class="pulse-dot"></span>
+      <strong>Hospital A (Medical History)</strong>: <span id="node-a-count">600</span> records
+    </div>
+    <div class="node-pill online" id="node-b-pill">
+      <span class="pulse-dot"></span>
+      <strong>Hospital B (Diagnostics & Labs)</strong>: <span id="node-b-count">556</span> records
+    </div>
+    <div class="node-pill online" id="node-c-pill">
+      <span class="pulse-dot"></span>
+      <strong>Hospital C (Pharmacy & Prescriptions)</strong>: <span id="node-c-count">546</span> records
+    </div>
+    <div class="node-pill ledger-ok" id="ledger-pill">
+      <span class="chain-icon">⛓️</span>
+      <strong>Audit Ledger</strong>: <span id="ledger-status-text">Cryptographically Verified</span>
+    </div>
+  </div>
+
+  <!-- Main Application Body -->
+  <main class="main-container">
+
+    <!-- Top Section: Visual Architecture & Interactive Topology -->
+    <section class="card topology-card">
+      <div class="card-header">
+        <div>
+          <h2>Federated Network Topology & Data Boundaries</h2>
+          <p class="section-desc">Raw clinical databases stay permanently inside local firewalls. Only cryptographic tokens, secret shares, and noise-perturbed statistics cross boundaries.</p>
+        </div>
+        <div class="privacy-badges">
+          <span class="badge badge-purple">HMAC Blinded Tokens</span>
+          <span class="badge badge-cyan">SMPC Secret Sharing</span>
+          <span class="badge badge-emerald">Laplace (ε, δ)-DP</span>
+          <span class="badge badge-amber">SHA-256 Audit Chain</span>
+        </div>
+      </div>
+
+      <div class="topology-canvas-wrap">
+        <svg class="topology-svg" id="topology-svg" viewBox="0 0 960 260">
+          <defs>
+            <linearGradient id="grad-a" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.3"/>
+              <stop offset="100%" stop-color="#1d4ed8" stop-opacity="0.7"/>
+            </linearGradient>
+            <linearGradient id="grad-b" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#10b981" stop-opacity="0.3"/>
+              <stop offset="100%" stop-color="#047857" stop-opacity="0.7"/>
+            </linearGradient>
+            <linearGradient id="grad-c" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.3"/>
+              <stop offset="100%" stop-color="#6d28d9" stop-opacity="0.7"/>
+            </linearGradient>
+            <linearGradient id="grad-hub" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.4"/>
+              <stop offset="100%" stop-color="#0e7490" stop-opacity="0.8"/>
+            </linearGradient>
+            <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="6" result="blur"/>
+              <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+            </filter>
+          </defs>
+
+          <!-- Connecting Communication Lines -->
+          <path id="line-a" class="network-path" d="M 160,70 Q 320,130 480,130" stroke="#3b82f6"/>
+          <path id="line-b" class="network-path" d="M 160,190 Q 320,130 480,130" stroke="#10b981"/>
+          <path id="line-c" class="network-path" d="M 800,130 L 480,130" stroke="#8b5cf6"/>
+          <path id="line-out" class="network-path" d="M 480,130 L 480,240" stroke="#06b6d4"/>
+
+          <!-- Animated Pulses -->
+          <circle id="pulse-a" class="pulse-particle" r="5" fill="#60a5fa" opacity="0"/>
+          <circle id="pulse-b" class="pulse-particle" r="5" fill="#34d399" opacity="0"/>
+          <circle id="pulse-c" class="pulse-particle" r="5" fill="#a78bfa" opacity="0"/>
+
+          <!-- Hospital A Node -->
+          <g class="node-group" transform="translate(60, 20)">
+            <rect width="200" height="90" rx="12" fill="url(#grad-a)" stroke="#3b82f6" stroke-width="1.5"/>
+            <text x="16" y="32" class="node-title">🏥 Hospital A</text>
+            <text x="16" y="52" class="node-sub">Medical History & ICD-10</text>
+            <text x="16" y="72" class="node-meta">🔐 Local Vault: hospital_a.db</text>
+          </g>
+
+          <!-- Hospital B Node -->
+          <g class="node-group" transform="translate(60, 145)">
+            <rect width="200" height="90" rx="12" fill="url(#grad-b)" stroke="#10b981" stroke-width="1.5"/>
+            <text x="16" y="32" class="node-title">🔬 Hospital B</text>
+            <text x="16" y="52" class="node-sub">Diagnostics & Biomarkers</text>
+            <text x="16" y="72" class="node-meta">🔐 Local Vault: hospital_b.db</text>
+          </g>
+
+          <!-- Central Privacy Hub / Orchestrator -->
+          <g class="node-group" transform="translate(380, 75)">
+            <rect width="200" height="110" rx="16" fill="url(#grad-hub)" stroke="#06b6d4" stroke-width="2" filter="url(#glow)"/>
+            <text x="16" y="34" class="node-title hub-title">🛡️ Privacy Orchestrator</text>
+            <text x="16" y="56" class="node-sub">SMPC Secret Sharing Engine</text>
+            <text x="16" y="74" class="node-sub">Differential Privacy Laplace Noise</text>
+            <text x="16" y="94" class="node-meta">📜 Immutable Audit Ledger</text>
+          </g>
+
+          <!-- Hospital C Node -->
+          <g class="node-group" transform="translate(700, 85)">
+            <rect width="200" height="90" rx="12" fill="url(#grad-c)" stroke="#8b5cf6" stroke-width="1.5"/>
+            <text x="16" y="32" class="node-title">💊 Hospital C</text>
+            <text x="16" y="52" class="node-sub">Pharmacy & Prescriptions</text>
+            <text x="16" y="72" class="node-meta">🔐 Local Vault: hospital_c.db</text>
+          </g>
+        </svg>
+      </div>
+    </section>
+
+    <!-- Mid Grid: Query Studio & Results -->
+    <div class="two-col-grid">
+
+      <!-- Left: Clinical Query Studio -->
+      <section class="card query-studio-card">
+        <div class="card-header">
+          <h2>Clinical Query Studio</h2>
+          <span class="badge badge-cyan">Federated SQL Planner</span>
+        </div>
+
+        <!-- Quick Presets -->
+        <div class="presets-container">
+          <span class="presets-label">Clinical Presets:</span>
+          <div class="preset-buttons">
+            <button class="btn-preset active" id="preset-user-question" data-preset="diabetes-metformin">
+              ✨ User Question: Diabetes + Metformin Response
+            </button>
+            <button class="btn-preset" data-preset="htn-lisinopril">
+              Hypertension + Lisinopril Control
+            </button>
+            <button class="btn-preset" data-preset="cad-statin">
+              CAD + Atorvastatin (LDL-C ≤ 100)
+            </button>
+            <button class="btn-preset" data-preset="asthma-fluticasone">
+              Asthma + Fluticasone Positive
+            </button>
+          </div>
+        </div>
+
+        <form id="query-form" class="query-form">
+          <!-- Hospital A Filters -->
+          <fieldset class="filter-section section-a">
+            <legend>🏥 Hospital A: Patient Medical History</legend>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="filter-condition">Clinical Condition</label>
+                <select id="filter-condition" class="form-control">
+                  <option value="">(Any Condition)</option>
+                  <option value="Type-2 Diabetes" selected>Type-2 Diabetes (E11.9)</option>
+                  <option value="Essential Hypertension">Essential Hypertension (I10)</option>
+                  <option value="Coronary Artery Disease">Coronary Artery Disease (I25.1)</option>
+                  <option value="Bronchial Asthma">Bronchial Asthma (J45.9)</option>
+                  <option value="Major Depressive Disorder">Major Depressive Disorder (F32.9)</option>
+                  <option value="Rheumatoid Arthritis">Rheumatoid Arthritis (M06.9)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="filter-severity">Disease Severity</label>
+                <select id="filter-severity" class="form-control">
+                  <option value="">(Any Severity)</option>
+                  <option value="Mild">Mild</option>
+                  <option value="Moderate">Moderate</option>
+                  <option value="Severe">Severe</option>
+                  <option value="Critical">Critical</option>
+                </select>
+              </div>
+            </div>
+          </fieldset>
+
+          <!-- Hospital B Filters -->
+          <fieldset class="filter-section section-b">
+            <legend>🔬 Hospital B: Diagnostics & Lab Reports</legend>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="filter-biomarker">Biomarker / Lab Test</label>
+                <select id="filter-biomarker" class="form-control">
+                  <option value="">(Any / No Lab Filter)</option>
+                  <option value="HbA1c">HbA1c (Glycated Hemoglobin)</option>
+                  <option value="Systolic BP">Systolic Blood Pressure</option>
+                  <option value="LDL-C">LDL-C (Cholesterol)</option>
+                  <option value="FEV1/FVC">FEV1/FVC Ratio</option>
+                  <option value="PHQ-9 Score">PHQ-9 Depression Score</option>
+                  <option value="hs-CRP">hs-CRP (Inflammation)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="filter-abnormal">Lab Result Threshold</label>
+                <select id="filter-abnormal" class="form-control">
+                  <option value="false">All Values</option>
+                  <option value="true">Abnormal Results Only</option>
+                </select>
+              </div>
+            </div>
+          </fieldset>
+
+          <!-- Hospital C Filters -->
+          <fieldset class="filter-section section-c">
+            <legend>💊 Hospital C: Pharmacy & Treatment Outcome</legend>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="filter-medication">Prescribed Drug</label>
+                <select id="filter-medication" class="form-control">
+                  <option value="">(Any Drug)</option>
+                  <option value="Metformin" selected>Metformin</option>
+                  <option value="Empagliflozin">Empagliflozin</option>
+                  <option value="Semaglutide">Semaglutide</option>
+                  <option value="Lisinopril">Lisinopril</option>
+                  <option value="Amlodipine">Amlodipine</option>
+                  <option value="Atorvastatin">Atorvastatin</option>
+                  <option value="Fluticasone">Fluticasone</option>
+                  <option value="Sertraline">Sertraline</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="filter-outcome">Treatment Response Outcome</label>
+                <select id="filter-outcome" class="form-control">
+                  <option value="">(Any Outcome)</option>
+                  <option value="Positive" selected>Positive Response</option>
+                  <option value="Partial">Partial Response</option>
+                  <option value="Non-Responsive">Non-Responsive</option>
+                  <option value="Adverse Event">Adverse Event</option>
+                </select>
+              </div>
+            </div>
+          </fieldset>
+
+          <!-- Privacy Defense Deck -->
+          <fieldset class="filter-section section-privacy">
+            <legend>🛡️ Privacy Defense Deck & Guarantees</legend>
+
+            <!-- Epsilon Slider -->
+            <div class="slider-group">
+              <div class="slider-header">
+                <label for="slider-epsilon">Differential Privacy Parameter: <strong>ε = <span id="epsilon-display">1.00</span></strong></label>
+                <span class="epsilon-guide" id="epsilon-guide">Balanced Tradeoff (Moderate Noise)</span>
+              </div>
+              <input type="range" id="slider-epsilon" min="0.05" max="5.0" step="0.05" value="1.00" class="custom-slider">
+              <div class="slider-ticks">
+                <span>0.05 (Max Privacy / High Noise)</span>
+                <span>1.00 (Standard)</span>
+                <span>5.00 (Max Utility / Low Noise)</span>
+              </div>
+            </div>
+
+            <!-- Privacy Toggles -->
+            <div class="toggle-row">
+              <label class="toggle-switch">
+                <input type="checkbox" id="toggle-dp" checked>
+                <span class="switch-slider"></span>
+                <span class="toggle-text">Differential Privacy (Laplace)</span>
+              </label>
+
+              <label class="toggle-switch">
+                <input type="checkbox" id="toggle-smpc" checked>
+                <span class="switch-slider"></span>
+                <span class="toggle-text">SMPC Secret Sharing</span>
+              </label>
+
+              <label class="toggle-switch">
+                <input type="checkbox" id="toggle-suppression" checked>
+                <span class="switch-slider"></span>
+                <span class="toggle-text">Suppress Cohort &lt; 5 (HIPAA)</span>
+              </label>
+            </div>
+          </fieldset>
+
+          <button type="submit" id="btn-run-query" class="btn-primary">
+            <span class="btn-icon">⚡</span> Run Collaborative Query
+          </button>
+        </form>
+      </section>
+
+      <!-- Right: Query Execution & Results -->
+      <section class="card results-card" id="results-card">
+        <div class="card-header">
+          <h2>Query Results & Privacy Metrics</h2>
+          <span class="badge badge-emerald" id="query-status-badge">Ready</span>
+        </div>
+
+        <div id="results-placeholder" class="results-placeholder">
+          <div class="placeholder-icon">🔬</div>
+          <p>Select your criteria and click <strong>"Run Collaborative Query"</strong> to execute the federated multi-hospital privacy pipeline.</p>
+        </div>
+
+        <div id="results-content" class="results-content hidden">
+          <!-- Primary Metric Card -->
+          <div class="primary-result-box">
+            <span class="result-label">Privacy-Preserved Patient Count:</span>
+            <div class="big-metric" id="metric-reported-count">--</div>
+            <span class="metric-ci" id="metric-ci">95% Confidence Interval: [ -- , -- ]</span>
+          </div>
+
+          <!-- Comparative Breakdown Grid -->
+          <div class="metrics-grid">
+            <div class="metric-tile">
+              <span class="tile-label">True Underlying Count</span>
+              <span class="tile-val highlight" id="metric-true-count">--</span>
+              <span class="tile-note">(Research demo comparison)</span>
+            </div>
+
+            <div class="metric-tile">
+              <span class="tile-label">Laplace Noise Added (Δ)</span>
+              <span class="tile-val" id="metric-noise-added">--</span>
+              <span class="tile-note">Lap(scale = 1/ε)</span>
+            </div>
+
+            <div class="metric-tile">
+              <span class="tile-label">Standard Error (σ)</span>
+              <span class="tile-val" id="metric-std-err">--</span>
+              <span class="tile-note">σ = √(2)/ε</span>
+            </div>
+
+            <div class="metric-tile">
+              <span class="tile-label">Privacy Loss (ε) Spent</span>
+              <span class="tile-val" id="metric-epsilon-spent">--</span>
+              <span class="tile-note" id="metric-budget-left">Remaining: --</span>
+            </div>
+          </div>
+
+          <!-- Sieve Pipeline: Records Evaluated at each Hospital -->
+          <div class="pipeline-trace">
+            <h3>Cross-Hospital Query Sieve</h3>
+            <div class="sieve-steps">
+              <div class="sieve-step">
+                <span class="sieve-node">Hospital A</span>
+                <span class="sieve-count" id="sieve-a">--</span>
+                <span class="sieve-desc">Condition matched</span>
+              </div>
+              <div class="sieve-arrow">➔</div>
+              <div class="sieve-step">
+                <span class="sieve-node">Hospital B</span>
+                <span class="sieve-count" id="sieve-b">--</span>
+                <span class="sieve-desc">Diagnostics filtered</span>
+              </div>
+              <div class="sieve-arrow">➔</div>
+              <div class="sieve-step">
+                <span class="sieve-node">Hospital C</span>
+                <span class="sieve-count" id="sieve-c">--</span>
+                <span class="sieve-desc">Rx outcome verified</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- SMPC Secret Sharing Trace -->
+          <div class="smpc-trace-box" id="smpc-trace-box">
+            <div class="trace-header">
+              <h3>🔒 SMPC Additive Secret Sharing Trace</h3>
+              <span class="badge badge-purple">Zero Knowledge Leaked</span>
+            </div>
+            <p class="trace-intro">Each hospital split its local sub-count into additive shares over finite field ℤ<sub>M</sub>. Peer shares were point-to-point exchanged without exposing any site's raw counts.</p>
+            <div class="trace-steps" id="smpc-steps">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <!-- Audit Block Info -->
+          <div class="audit-badge-strip">
+            <span>Audit Block #<strong id="res-audit-index">--</strong></span>
+            <span>Hash: <code id="res-audit-hash">--</code></span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Bottom Grid: Vault Inspector, Anonymizer & Cryptographic Ledger -->
+    <div class="three-col-grid">
+
+      <!-- Column 1: Hospital Vaults (Data Isolation Inspector) -->
+      <section class="card vault-card">
+        <div class="card-header">
+          <div>
+            <h2>Inside Hospital Vaults</h2>
+            <p class="section-desc">Proof of data isolation: inspect local database tables that never leave hospital firewalls.</p>
+          </div>
+        </div>
+
+        <div class="vault-tabs">
+          <button class="vault-tab active" data-node="node_a">Hospital A</button>
+          <button class="vault-tab" data-node="node_b">Hospital B</button>
+          <button class="vault-tab" data-node="node_c">Hospital C</button>
+        </div>
+
+        <div class="vault-table-wrap">
+          <table class="vault-table" id="vault-table">
+            <thead>
+              <tr id="vault-headers">
+                <th>Token</th>
+                <th>Age</th>
+                <th>Gender</th>
+                <th>Condition</th>
+                <th>Severity</th>
+              </tr>
+            </thead>
+            <tbody id="vault-body">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Column 2: k-Anonymity & l-Diversity Exporter -->
+      <section class="card anonymizer-card">
+        <div class="card-header">
+          <div>
+            <h2>k-Anonymity Microdata Export</h2>
+            <p class="section-desc">Generalizes quasi-identifiers (Age, Gender) into intervals and suppresses small equivalence classes.</p>
+          </div>
+          <span class="badge badge-emerald">Safe Cohort View</span>
+        </div>
+
+        <div class="anonymizer-controls">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="anon-condition">Target Cohort</label>
+              <select id="anon-condition" class="form-control">
+                <option value="Type-2 Diabetes">Type-2 Diabetes</option>
+                <option value="Essential Hypertension">Essential Hypertension</option>
+                <option value="Coronary Artery Disease">Coronary Artery Disease</option>
+                <option value="Bronchial Asthma">Bronchial Asthma</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="anon-k">k-Threshold (Class Size)</label>
+              <input type="number" id="anon-k" min="2" max="20" value="5" class="form-control">
+            </div>
+            <div class="form-group">
+              <label for="anon-l">ℓ-Diversity (Sensitive Values)</label>
+              <input type="number" id="anon-l" min="1" max="5" value="2" class="form-control">
+            </div>
+          </div>
+          <button id="btn-export-anonymized" class="btn-secondary">
+            Generate Anonymized Dataset
+          </button>
+        </div>
+
+        <div id="anon-results" class="anon-results-box hidden">
+          <div class="anon-summary-pills">
+            <span class="pill">Input Records: <strong id="anon-total-in">--</strong></span>
+            <span class="pill success">Retained (k≥5): <strong id="anon-retained">--</strong></span>
+            <span class="pill warning">Suppressed: <strong id="anon-suppressed">--</strong></span>
+          </div>
+          <div class="vault-table-wrap compact">
+            <table class="vault-table" id="anon-table">
+              <thead>
+                <tr>
+                  <th>Age Band</th>
+                  <th>Gender</th>
+                  <th>Condition</th>
+                  <th>Severity</th>
+                  <th>Outcome</th>
+                </tr>
+              </thead>
+              <tbody id="anon-tbody">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Column 3: Cryptographic Audit Ledger Explorer -->
+      <section class="card ledger-card">
+        <div class="card-header">
+          <div>
+            <h2>Tamper-Evident Audit Ledger</h2>
+            <p class="section-desc">SHA-256 hash-chain block recording for every query and privacy loss.</p>
+          </div>
+          <button id="btn-verify-chain" class="btn-outline">Verify Chain</button>
+        </div>
+
+        <div class="ledger-actions">
+          <button id="btn-simulate-tamper" class="btn-xs danger">Simulate Tampering</button>
+          <button id="btn-restore-chain" class="btn-xs hidden">Restore Block</button>
+          <span id="chain-integrity-badge" class="chain-badge valid">Chain Valid</span>
+        </div>
+
+        <div class="blocks-container" id="blocks-container">
+          <!-- Dynamically populated with Audit Blocks -->
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="app-footer">
+    <p>PP-HDB: Privacy-Preserving Healthcare Database Research Prototype &copy; 2026. Built with Python ASGI, SQLite, Differential Privacy, SMPC, and SHA-256 Hash Chaining.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
